@@ -1,13 +1,15 @@
 """SQLite repository; schema changes are applied transactionally."""
 from __future__ import annotations
 from pathlib import Path
+import hashlib
 import json
+import math
 import sqlite3
 import struct
 from uuid import uuid4
 from .models import Agent, AgentInput, Connection, ConnectionInput, Snapshot, Workspace, WorkspaceInput
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 class Store:
@@ -197,6 +199,16 @@ class Store:
                 COMMIT;
             """)
 
+        if current < 9:
+            self.db.executescript("""
+                BEGIN IMMEDIATE;
+                ALTER TABLE knowledge_chunks ADD COLUMN content_hash TEXT NOT NULL DEFAULT '';
+                ALTER TABLE knowledge_sources ADD COLUMN index_version TEXT NOT NULL DEFAULT 'legacy-v8';
+                CREATE INDEX knowledge_chunks_content_hash ON knowledge_chunks(content_hash);
+                PRAGMA user_version=9;
+                COMMIT;
+            """)
+
     def close(self):
         self.db.close()
 
@@ -252,6 +264,35 @@ class Store:
                 (identifier, value.name, value.embedding_provider, value.embedding_model, dimensions))
         return identifier
 
+    def knowledge_collection(self, collection_id: str):
+        row = self.db.execute("""SELECT id,name,embedding_provider,embedding_model,dimensions
+            FROM knowledge_collections WHERE id=?""", (collection_id,)).fetchone()
+        return dict(row) if row else None
+
+    def knowledge_source_hash(self, collection_id: str, workspace_id: str, path: str):
+        row = self.db.execute("""SELECT content_hash,status,index_version FROM knowledge_sources
+            WHERE collection_id=? AND workspace_id=? AND path=?""",
+            (collection_id, workspace_id, path)).fetchone()
+        return dict(row) if row else None
+
+    def cached_chunk_embeddings(self, collection_id: str, content_hashes: list[str]):
+        unique = list(dict.fromkeys(value for value in content_hashes if value))
+        cached = {}
+        for offset in range(0, len(unique), 500):
+            batch = unique[offset:offset + 500]
+            placeholders = ','.join('?' for _ in batch)
+            rows = self.db.execute(f"""SELECT k.content_hash,k.embedding,c.dimensions
+                FROM knowledge_chunks k
+                JOIN knowledge_sources s ON s.id=k.source_id
+                JOIN knowledge_collections c ON c.id=s.collection_id
+                WHERE s.collection_id=? AND k.content_hash IN ({placeholders})""",
+                (collection_id, *batch))
+            for row in rows:
+                if row['content_hash'] not in cached:
+                    cached[row['content_hash']] = list(struct.unpack(
+                        f"<{row['dimensions']}f", row['embedding']))
+        return cached
+
     def knowledge_snapshot(self, embedding_models=None):
         from .models import EmbeddingModel, KnowledgeCollection, KnowledgeSnapshot
         collections = []
@@ -267,7 +308,8 @@ class Store:
             embedding_models=[EmbeddingModel(**item) for item in (embedding_models or [])])
 
     def replace_knowledge_source(self, collection_id: str, workspace_id: str, path: str,
-                                 content_hash: str, chunks: list[dict]):
+                                 content_hash: str, chunks: list[dict],
+                                 index_version: str = 'zerocost-chunk-v1'):
         collection = self.db.execute("SELECT dimensions FROM knowledge_collections WHERE id=?",
                                      (collection_id,)).fetchone()
         if collection is None or self.workspace(workspace_id) is None:
@@ -277,11 +319,14 @@ class Store:
         prepared = []
         for ordinal, chunk in enumerate(chunks):
             vector = chunk['embedding']
-            if len(vector) != dimensions:
+            if (len(vector) != dimensions or
+                    any(not math.isfinite(float(value)) for value in vector)):
                 raise ValueError('Embedding boyutu koleksiyonla uyuşmuyor.')
+            chunk_hash = chunk.get('content_hash') or hashlib.sha256(
+                chunk['content'].encode('utf-8')).hexdigest()
             prepared.append((str(uuid4()), source_id, ordinal, int(chunk['start_line']),
                              int(chunk['end_line']), chunk['content'],
-                             struct.pack(f'<{dimensions}f', *vector)))
+                             struct.pack(f'<{dimensions}f', *vector), chunk_hash))
         with self.db:
             old = self.db.execute("""SELECT id FROM knowledge_sources
                 WHERE collection_id=? AND workspace_id=? AND path=?""",
@@ -293,9 +338,12 @@ class Store:
                                     [(identifier,) for identifier in chunk_ids])
                 self.db.execute("DELETE FROM knowledge_sources WHERE id=?", (old['id'],))
             self.db.execute("""INSERT INTO knowledge_sources
-                (id,collection_id,workspace_id,path,content_hash,status) VALUES (?,?,?,?,?,'ready')""",
-                (source_id, collection_id, workspace_id, path, content_hash))
-            self.db.executemany("INSERT INTO knowledge_chunks VALUES (?,?,?,?,?,?,?)", prepared)
+                (id,collection_id,workspace_id,path,content_hash,status,index_version)
+                VALUES (?,?,?,?,?,'ready',?)""",
+                (source_id, collection_id, workspace_id, path, content_hash, index_version))
+            self.db.executemany("""INSERT INTO knowledge_chunks
+                (id,source_id,ordinal,start_line,end_line,content,embedding,content_hash)
+                VALUES (?,?,?,?,?,?,?,?)""", prepared)
             self.db.executemany("""INSERT INTO knowledge_chunks_fts
                 (chunk_id,collection_id,source_path,content) VALUES (?,?,?,?)""",
                 [(item[0], collection_id, path, item[5]) for item in prepared])

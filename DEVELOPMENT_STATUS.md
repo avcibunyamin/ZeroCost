@@ -115,3 +115,12 @@ Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırıl
 - Bilgi Yönetimi ekranından model seçerek koleksiyon oluşturma ve kalıcı belge/parça sayaçları
 - Ollama çevrimdışıyken kayıtlı koleksiyonları koruyan ve bağlantı durumunu ayrı gösteren davranış
 - 50 Python, 9 JavaScript sözleşme ve Rust köprü testi geçti
+
+## Faz 3 · İçerik hash ve idempotent indeksleme
+
+- SQLite v8 → v9 migration; kaynak indeks sürümü ve chunk SHA-256 alanı
+- Aynı belge + indeks sürümünde sıfır embedding çağrısıyla kısa devre
+- Değişen belgelerde koleksiyon kapsamındaki aynı chunk vektörlerini yeniden kullanma
+- Yinelenen yeni chunk'ları tek embedding girdisine indirme ve 32'lik sağlayıcı partileri
+- Kaynak/chunk/FTS değişimini tek transaction içinde atomik uygulama
+- 54 Python ve 9 JavaScript sözleşme testi geçti

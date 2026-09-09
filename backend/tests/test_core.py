@@ -178,7 +178,7 @@ def test_v4_orchestration_migrates_with_budget_defaults(tmp_path):
 
     migrated = Store(path)
     run = migrated.orchestration_history().runs[0]
-    assert migrated.snapshot().database_version == 8
+    assert migrated.snapshot().database_version == 9
     assert run.routing_mode == 'manual' and run.max_model_calls == 5
     assert run.agent_ids == [a.id for a in agents]
     assert migrated.db.execute('PRAGMA foreign_key_check').fetchall() == []
@@ -243,6 +243,35 @@ def test_knowledge_collection_ipc_probes_embedding_dimensions(tmp_path):
         store.close()
 
     asyncio.run(scenario())
+
+
+def test_v8_knowledge_data_migrates_to_versioned_hash_cache(tmp_path):
+    root = tmp_path / 'project'
+    root.mkdir()
+    path = tmp_path / 'v8.sqlite3'
+    store = Store(path)
+    store.create_workspace(WorkspaceInput(name='Project', path=str(root)))
+    workspace = store.snapshot().workspaces[0]
+    collection_id = store.create_knowledge_collection(KnowledgeCollectionInput(
+        name='Legacy docs', embedding_model='embed-local'), 3)
+    store.replace_knowledge_source(collection_id, workspace.id, 'legacy.md', 'old-hash', [{
+        'start_line': 1, 'end_line': 1, 'content': 'korunan içerik',
+        'embedding': [1.0, 0.0, 0.0],
+    }])
+    store.db.execute('DROP INDEX knowledge_chunks_content_hash')
+    store.db.execute('ALTER TABLE knowledge_chunks DROP COLUMN content_hash')
+    store.db.execute('ALTER TABLE knowledge_sources DROP COLUMN index_version')
+    store.db.execute('PRAGMA user_version=8')
+    store.db.commit()
+    store.close()
+
+    migrated = Store(path)
+    source = migrated.knowledge_source_hash(collection_id, workspace.id, 'legacy.md')
+    assert migrated.snapshot().database_version == 9
+    assert source == {'content_hash': 'old-hash', 'status': 'ready', 'index_version': 'legacy-v8'}
+    assert migrated.search_knowledge_fts(collection_id, 'korunan')[0]['content'] == 'korunan içerik'
+    assert migrated.db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+    migrated.close()
 
 
 def test_atomic_workspace_write_rechecks_hash_and_rejects_symlink(tmp_path):

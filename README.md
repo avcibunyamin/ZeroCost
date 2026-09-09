@@ -75,7 +75,7 @@ Entegrasyon referansları: [keyring](https://docs.rs/keyring/3.6.3/keyring/), [A
 
 **Bilgi yönetimi** ekranı Ollama'nın embedding yeteneği bildiren kurulu modellerini keşfeder. Koleksiyon oluşturulurken `/api/embed` ile yerel bir boyut probu yapılır; dönen vektör doğrulanır, L2 normalize edilir ve koleksiyonun model/boyut sözleşmesi SQLite'a kaydedilir. Ollama erişilemez olsa da önceden kaydedilmiş koleksiyonlar görüntülenir. API anahtarı veya ücretli bulut çağrısı kullanılmaz.
 
-SQLite şema v8; koleksiyon, kaynak ve parça tablolarını, Unicode FTS5 tam metin indeksini ve küçük endian float32 embedding BLOB'larını içerir. Kaynak yenileme aynı koleksiyon/workspace/yol anahtarında transaction içinde eskisini değiştirir; vektör boyutu uyuşmazlığı reddedilir. Bu taşınabilir temel harici bir vektör veritabanı gerektirmez. Belge chunking, kaynak ekleme UI'si, hibrit sıralama ve ajan `knowledge.search` aracı sonraki dilimin kapsamındadır.
+SQLite şema v9; koleksiyon, kaynak ve parça tablolarını, Unicode FTS5 tam metin indeksini ve küçük endian float32 embedding BLOB'larını içerir. Belgenin tam UTF-8 içeriği ve her chunk SHA-256 ile özetlenir. Aynı içerik ve indeks sürümü tekrar işlendiğinde embedding çağrısı yapılmaz; belge değiştiğinde koleksiyon içindeki aynı chunk vektörleri yeniden kullanılır ve yalnız benzersiz yeni parçalar 32'lik partilerle embed edilir. Sürümlü chunk hash alanı, ileride ayrıştırma/embedding girdisi değiştiğinde eski cache'i güvenle geçersiz kılar. Kaynak yenileme aynı koleksiyon/workspace/yol anahtarında transaction içinde eskisini değiştirir; vektör boyutu uyuşmazlığı reddedilir. Bu taşınabilir temel harici bir vektör veritabanı gerektirmez. Belge ayrıştırma, kaynak ekleme UI'si, hibrit sıralama ve ajan `knowledge.search` aracı sonraki dilimin kapsamındadır.
 
 Embedding API sözleşmesi: [Ollama Embeddings](https://docs.ollama.com/capabilities/embeddings) ve [Ollama `/api/embed`](https://docs.ollama.com/api/embed).
 
@@ -127,7 +127,7 @@ macOS uygulaması `src-tauri/target/release/bundle/macos/ZeroCost.app` altında 
 
 ## Sonraki geliştirme dilimi
 
-1. Belge chunking hattı, kaynak ekleme arayüzü ve içerik özetiyle idempotent yeniden indeksleme.
+1. Belge ayrıştırma/chunking hattı ve kaynak ekleme arayüzü.
 2. Hibrit FTS/vektör sıralaması, kaynak alıntıları ve ajan `knowledge.search` aracı.
 3. Skill paket manifesti, sürümleme ve izin beyanları.
 4. Kesilmiş üretim düğümünü kontrollü yeniden deneme ve kısmi görev devamı.
