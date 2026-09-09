@@ -124,3 +124,12 @@ Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırıl
 - Yinelenen yeni chunk'ları tek embedding girdisine indirme ve 32'lik sağlayıcı partileri
 - Kaynak/chunk/FTS değişimini tek transaction içinde atomik uygulama
 - 54 Python ve 9 JavaScript sözleşme testi geçti
+
+## Faz 3 · Metin ve Markdown ayrıştırma
+
+- `.txt` paragraf ayrımı; `.md/.markdown/.mdown/.mkd` semantik blok ayrıştırması
+- ATX ve Setext başlık hiyerarşisi; paragraf, liste, tablo, alıntı, fenced code ve frontmatter sınırları
+- Her blokta kaynak başlangıç/bitiş satırı ve başlık breadcrumb bilgisi
+- CRLF/CR normalizasyonu; NUL, 1.000.000 karakter ve 50.000 satır sınırları
+- CommonMark lazy liste devamı ve code içindeki Markdown işaretlerini koruma
+- 60 Python ve 9 JavaScript sözleşme testi geçti

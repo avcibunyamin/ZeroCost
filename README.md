@@ -75,7 +75,9 @@ Entegrasyon referansları: [keyring](https://docs.rs/keyring/3.6.3/keyring/), [A
 
 **Bilgi yönetimi** ekranı Ollama'nın embedding yeteneği bildiren kurulu modellerini keşfeder. Koleksiyon oluşturulurken `/api/embed` ile yerel bir boyut probu yapılır; dönen vektör doğrulanır, L2 normalize edilir ve koleksiyonun model/boyut sözleşmesi SQLite'a kaydedilir. Ollama erişilemez olsa da önceden kaydedilmiş koleksiyonlar görüntülenir. API anahtarı veya ücretli bulut çağrısı kullanılmaz.
 
-SQLite şema v9; koleksiyon, kaynak ve parça tablolarını, Unicode FTS5 tam metin indeksini ve küçük endian float32 embedding BLOB'larını içerir. Belgenin tam UTF-8 içeriği ve her chunk SHA-256 ile özetlenir. Aynı içerik ve indeks sürümü tekrar işlendiğinde embedding çağrısı yapılmaz; belge değiştiğinde koleksiyon içindeki aynı chunk vektörleri yeniden kullanılır ve yalnız benzersiz yeni parçalar 32'lik partilerle embed edilir. Sürümlü chunk hash alanı, ileride ayrıştırma/embedding girdisi değiştiğinde eski cache'i güvenle geçersiz kılar. Kaynak yenileme aynı koleksiyon/workspace/yol anahtarında transaction içinde eskisini değiştirir; vektör boyutu uyuşmazlığı reddedilir. Bu taşınabilir temel harici bir vektör veritabanı gerektirmez. Belge ayrıştırma, kaynak ekleme UI'si, hibrit sıralama ve ajan `knowledge.search` aracı sonraki dilimin kapsamındadır.
+SQLite şema v9; koleksiyon, kaynak ve parça tablolarını, Unicode FTS5 tam metin indeksini ve küçük endian float32 embedding BLOB'larını içerir. Belgenin tam UTF-8 içeriği ve her chunk SHA-256 ile özetlenir. Aynı içerik ve indeks sürümü tekrar işlendiğinde embedding çağrısı yapılmaz; belge değiştiğinde koleksiyon içindeki aynı chunk vektörleri yeniden kullanılır ve yalnız benzersiz yeni parçalar 32'lik partilerle embed edilir. Sürümlü chunk hash alanı, ileride ayrıştırma/embedding girdisi değiştiğinde eski cache'i güvenle geçersiz kılar. Kaynak yenileme aynı koleksiyon/workspace/yol anahtarında transaction içinde eskisini değiştirir; vektör boyutu uyuşmazlığı reddedilir. Bu taşınabilir temel harici bir vektör veritabanı gerektirmez. Sliding-window chunking, kaynak ekleme UI'si, hibrit sıralama ve ajan `knowledge.search` aracı sonraki dilimin kapsamındadır.
+
+Metin ve Markdown ayrıştırıcısı CRLF/CR satır sonlarını deterministik biçimde normalize eder; kaynak satır numaralarını koruyarak başlık, paragraf, liste, tablo, alıntı, fenced code ve YAML frontmatter blokları üretir. ATX/Setext başlıkları ile başlık hiyerarşisi korunur; code içindeki Markdown işaretleri ayrıştırılmaz. Girdi NUL, 1.000.000 karakter ve 50.000 satır sınırlarıyla çevrelenir. Ayrıştırıcı henüz semantik blokları boyuta göre bölmez; sliding-window/overlap katmanı sonraki dilimdir.
 
 Embedding API sözleşmesi: [Ollama Embeddings](https://docs.ollama.com/capabilities/embeddings) ve [Ollama `/api/embed`](https://docs.ollama.com/api/embed).
 
@@ -127,7 +129,7 @@ macOS uygulaması `src-tauri/target/release/bundle/macos/ZeroCost.app` altında 
 
 ## Sonraki geliştirme dilimi
 
-1. Belge ayrıştırma/chunking hattı ve kaynak ekleme arayüzü.
+1. Semantik bloklar üzerinde sliding-window/overlap chunking ve kaynak ekleme arayüzü.
 2. Hibrit FTS/vektör sıralaması, kaynak alıntıları ve ajan `knowledge.search` aracı.
 3. Skill paket manifesti, sürümleme ve izin beyanları.
 4. Kesilmiş üretim düğümünü kontrollü yeniden deneme ve kısmi görev devamı.

@@ -17,6 +17,8 @@ const result = spawnSync(
     "zerocost-sidecar",
     "--paths",
     "backend",
+    "--hidden-import",
+    "zerocost.ingestion",
     "--distpath",
     ".sidecar-build/dist",
     "--workpath",
