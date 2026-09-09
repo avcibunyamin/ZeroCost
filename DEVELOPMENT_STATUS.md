@@ -63,11 +63,11 @@
 - Claude, Gemini ve Ollama adaptörleri sağlayıcı kullanım sayaçlarını ortak `TokenUsage` yapısına dönüştürür.
 - Görev planı bütçeyi aşarsa ağ erişiminden önce reddedilir; bilinmeyen bulut modelinde fiyat tahmini kapalı davranır.
 - Her çağrı sonrasında kümülatif token ve standart USD liste maliyeti canlı olayla arayüze gönderilir.
-- 42 Python ve 8 JavaScript sözleşme testi geçti.
+- 45 Python ve 8 JavaScript sözleşme testi geçti.
 
 ## Sınırlar
 
-Salt okunur workspace aracı yalnız kullanıcı seçtiği ve çalıştırma anında onayladığı dosyaları bağlama alır; model tarafından başlatılan tool calling, dosya yazma ve terminal henüz yok. Router kural ve kapasite sinyalleri kullanır. Maliyet, sağlayıcı faturası yerine sürümlü standart liste fiyatının gerçek token kullanımına uygulanmasıdır; ücretsiz katman, cache, batch, araç ücretleri ve hesaba özel fiyatlar henüz yoktur. Eşzamanlı üretim limiti birdir. İmzalı/notarize dağıtım ve Windows/Linux doğrulaması yapılmadı. Google SDK, Pydantic 2.13 kullanımı için upstream deprecation uyarısı üretir.
+Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırılmış JSON üretiminin güvenilirliği modele bağlıdır. Terminal süreci OS sandbox değildir; argv, cwd, executable, timeout, çıktı sınırı ve zorunlu yüksek risk onayıyla çevrelenir. Router kural ve kapasite sinyalleri kullanır. Maliyet sağlayıcı faturası yerine sürümlü standart liste fiyatının gerçek token kullanımına uygulanmasıdır. Eşzamanlı üretim limiti birdir. İmzalı/notarize dağıtım ve Windows/Linux doğrulaması yapılmadı. Google SDK, Pydantic 2.13 kullanımı için upstream deprecation uyarısı üretir.
 
 ## Yollar
 
@@ -85,10 +85,10 @@ Salt okunur workspace aracı yalnız kullanıcı seçtiği ve çalıştırma an�
 
 ## Güncel doğrulama
 
-- 42 Python ve 8 JavaScript sözleşme testi geçti.
+- 45 Python ve 8 JavaScript sözleşme testi geçti.
 - 2 Rust testi, native macOS kasa testi dahil, geçti.
 - Paketlenmiş sidecar gerçek Ollama ile rota ve üç model çağrısı akışını tamamladı; kullanım olayları doğrulandı.
-- Kullanıcı veritabanı v5'ten v6'ya veri bütünlüğü korunarak geçti; kurulu `/Applications/ZeroCost.app` şema v6 ile bağlı çalışıyor.
+- Kullanıcı veritabanı v6'dan v7'ye veri bütünlüğü korunarak geçti; kurulu `/Applications/ZeroCost.app` şema v7 ile bağlı çalışıyor.
 
 ## Faz 2 · Fiat bütçe
 
@@ -97,3 +97,12 @@ Salt okunur workspace aracı yalnız kullanıcı seçtiği ve çalıştırma an�
 - Sağlayıcının bildirdiği tokenların çağrı ve görev bazında kalıcı toplanması
 - Arayüzde katalog, üst tahmin ve token bazlı liste maliyeti
 - SQLite v5 → v6 kayıpsız geçiş
+
+## Faz 2 · Yazma ve terminal araçları
+
+- Ajan bazında `workspace.write` ve `terminal.execute`; görev bazında ayrı etkinleştirme
+- Modelin tek ve katı `zerocost-tool` JSON önerisi
+- Diff veya tam argv gösteren ikinci kalıcı LangGraph onay noktası
+- SHA-256 iyimser eşzamanlılık kontrolü ve atomik workspace yazması
+- Shell olmadan, workspace cwd, executable izin listesi, azaltılmış ortam, 60 saniye ve 64 KiB terminal sınırı
+- SQLite v6 → v7 migration; bekleyen/sonuçlanan araç denetim kaydı

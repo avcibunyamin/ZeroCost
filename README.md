@@ -36,7 +36,7 @@ Windows'ta Python komutu `.venv\Scripts\python.exe` olur. Node yardımcı betikl
 - Ajan bazında `workspace.read` izni; sınırlandırılmış klasör listeleme ve UTF-8 metin okuma araçları.
 - Kullanıcının seçtiği en fazla 10 çalışma alanı dosyasını çoklu ajan bağlamına ekleme.
 
-Claude ve Gemini akışlı sohbet adaptörleri ve Rust yönetiminde OS anahtar kasası eklendi. Faz 2'nin çoklu ajan, otomatik router, yürütme bütçesi ve kullanıcı onaylı salt okunur çalışma alanı dilimi çalışır. Yazma, terminal ve vektör RAG henüz uygulanmadı; bu sürüm üretime hazır değildir.
+Claude ve Gemini akışlı sohbet adaptörleri ve Rust yönetiminde OS anahtar kasası eklendi. Faz 2'nin çoklu ajan, otomatik router, yürütme bütçesi, kontrollü çalışma alanı yazması ve terminal dilimi çalışır. Vektör RAG henüz uygulanmadı; bu sürüm üretime hazır değildir.
 
 ## Bulut bağlantısı ve anahtar kasası
 
@@ -62,7 +62,11 @@ USD görev bütçesi, `2026-09-09` sürümlü fiyat kataloğunu kullanır. Başl
 
 Katalog doğrudan API standart fiyatlarını temel alır: [Anthropic Claude API fiyatları](https://platform.claude.com/docs/en/about-claude/pricing) ve [Google Gemini API fiyatları](https://ai.google.dev/gemini-api/docs/pricing). Ücretsiz katman, batch indirimi, prompt cache, araç ücretleri, vergiler, kur dönüşümü ve hesaba özel indirimler hesaplanmaz. Gösterilen kullanım tutarı sağlayıcının faturası değil, gerçek token sayısına uygulanmış katalog liste maliyetidir. Gemini 2.5 Pro'nun 200 bin token üzeri uzun bağlam tarifesi desteklenir.
 
-Ajanlar varsayılan olarak dosya okuyamaz. Kullanıcı **Ajanlar** ekranından `workspace.read` iznini ajan bazında açar ve görev formunda okunacak göreli yolları açıkça seçer. LangGraph, somut dosya listesini `interrupt()` yüküyle arayüze gönderir ve görevi kalıcı `waiting_approval` durumuna alır. Onay aynı `thread_id` üzerinden devam eder; ret sıfır model çağrısıyla görevi kapatır. Dosya içerikleri onay öncesinde okunmaz ve ana görev kaydında tutulmaz. Mutlak yollar, `..`/symlink ile çalışma alanı dışına çıkış, gizli ve yaygın build klasörleri, UTF-8 olmayan/ikili içerik, izin verilmeyen uzantılar ve 128 KiB üzerindeki dosyalar reddedilir. En fazla 10 dosya ve toplam 128.000 karakter bağlama alınır. Bulut ajan seçilmişse onaylanan içerik ilgili sağlayıcıya gönderilir. Modelin kendi başına yol seçmesi, dosya yazması veya terminal çalıştırması bu dilimde mümkün değildir.
+Ajanlar varsayılan olarak dosya okuyamaz. Kullanıcı **Ajanlar** ekranından `workspace.read` iznini ajan bazında açar ve görev formunda okunacak göreli yolları açıkça seçer. LangGraph, somut dosya listesini `interrupt()` yüküyle arayüze gönderir ve görevi kalıcı `waiting_approval` durumuna alır. Onay aynı `thread_id` üzerinden devam eder; ret sıfır model çağrısıyla görevi kapatır. Dosya içerikleri onay öncesinde okunmaz ve ana görev kaydında tutulmaz. Mutlak yollar, `..`/symlink ile çalışma alanı dışına çıkış, gizli ve yaygın build klasörleri, UTF-8 olmayan/ikili içerik, izin verilmeyen uzantılar ve 128 KiB üzerindeki dosyalar reddedilir. En fazla 10 dosya ve toplam 128.000 karakter bağlama alınır. Bulut ajan seçilmişse onaylanan içerik ilgili sağlayıcıya gönderilir.
+
+`workspace.write` ve `terminal.execute` ajan bazında ayrı izinlerdir ve görev bazında ayrıca etkinleştirilir. Koordinatör model en fazla bir `zerocost-tool` JSON zarfı önerebilir. Backend zarfı katı şemayla doğrular; yazma için birleşik diff, terminal için tam argv ve çözümlenmiş binary yolu gösterir. LangGraph ikinci bir kalıcı onay noktasında durur. Ret halinde sentez korunur ve işlem yapılmaz. Yazma, metin uzantısı ve 128 KiB sınırıyla workspace içinde kalır; gizli/dışlanan yol ve symlink hedefleri reddedilir. Onay beklerken dosyanın SHA-256 özeti değişirse işlem iptal edilir; kabul edilen içerik geçici dosya, `fsync` ve atomik `replace` ile uygulanır.
+
+Terminal shell kullanmaz; komut argv dizisi olarak çalıştırılır. Çalışma dizini kayıtlı workspace içinde çözülür, executable sabit izin listesinden seçilir, ortam değişkenleri azaltılır, süre 60 saniye ve gösterilen çıktı 64 KiB ile sınırlanır. Terminalde izin verilen `npm`, `cargo`, `python` gibi araçlar proje kodu çalıştırabileceği için onay ekranında **yüksek risk** olarak gösterilir. Bu süreç bir OS sandbox değildir; kullanıcı tam komutu incelemeden onay vermemelidir.
 
 Entegrasyon referansları: [keyring](https://docs.rs/keyring/3.6.3/keyring/), [Anthropic Python SDK](https://github.com/anthropics/anthropic-sdk-python), [Google GenAI SDK](https://googleapis.github.io/python-genai/).
 
@@ -87,7 +91,7 @@ Veritabanı Tauri'nin platforma özgü uygulama veri dizininde tutulur. macOS: `
 
 UI Python'a doğrudan erişmez; Rust tek bir sidecar sürecini tembel başlatır. Geliştirmede `.venv` Python'ı; release'te uygulama yanında paketlenen `zerocost-sidecar` çalışır. `PYTHONUNBUFFERED=1` ve her çerçevede flush kullanılır. stdout yalnızca protokol içindir; tanı mesajları stderr'e gider. Rust yanıtları `request_id` ile bekleyen çağrılara, akış olaylarını Tauri `chat_stream` kanalına yönlendirir. Backend kilidi yanıt beklerken tutulmadığından iptal komutu akış sırasında işlenebilir. Yazma işlemi otomatik tekrarlanmaz: sonucu belirsiz bir kayıt için önce durumu yenileyin.
 
-Başlangıçta ajanlara araç yetkisi verilmez. Çalışma alanı kaydı tek başına içerik erişimi vermez; okuma hem ajan izni hem kullanıcı tarafından seçilmiş göreli dosya yolu gerektirir. Ağ çağrıları sabit Ollama/Anthropic/Gemini uç noktalarıyla sınırlıdır. Python süreç izolasyonu bir OS sandbox değildir; serbest kod/terminal yürütme bu sürümde sunulmaz.
+Başlangıçta ajanlara araç yetkisi verilmez. Çalışma alanı kaydı tek başına içerik erişimi vermez; her araç hem ajan izni hem görev kapsamı hem de somut kullanıcı onayı gerektirir. Ağ çağrıları sabit Ollama/Anthropic/Gemini uç noktalarıyla sınırlıdır. Python sidecar ve terminal alt süreci OS sandbox değildir.
 
 Bu ilk şema SQLite `user_version` ile transaction içinde uygulanır. İlerideki migration'lar mevcut kullanıcı verisini korumalı; daha yeni şemalı DB açılmaya çalışılırsa uygulama reddeder. SQLAlchemy/Alembic geçişi, görev ve sohbet veri modeli eklenirken ayrıca ele alınacak.
 
@@ -114,7 +118,7 @@ macOS uygulaması `src-tauri/target/release/bundle/macos/ZeroCost.app` altında 
 
 ## Sonraki geliştirme dilimi
 
-1. Model tarafından önerilen araç çağrıları için genişletilebilir onay kuyruğu; workspace yazma aracı.
-2. Terminal için komut ayrıştırma, risk sınıfları, çalışma dizini sınırı ve açık onay.
+1. RAG dizini, kaynak alıntıları ve bilgi koleksiyonları.
+2. Skill paket manifesti, sürümleme ve izin beyanları.
 3. Kesilmiş üretim düğümünü kontrollü yeniden deneme ve kısmi görev devamı.
 4. Sağlayıcı cache/batch tarifeleri ve kullanıcıya özel fiyat profilleri.

@@ -848,6 +848,9 @@ main {
 
 .approval-card p { margin: 10px 0 6px; }
 .approval-card ul { margin: 0 0 14px; padding-left: 20px; font-family: monospace; }
+.approval-card pre,
+.approval-card code { display: block; max-height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 10px/1.55 monospace; }
+.approval-card pre { padding: 10px; border-radius: 8px; background: #f8fbf9; }
 .approval-actions { flex-wrap: wrap; }
 .agent-choice {
   grid-template-columns: auto 1fr;

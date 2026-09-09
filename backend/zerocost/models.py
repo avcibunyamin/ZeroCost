@@ -5,7 +5,8 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=128)]
 Provider = Literal["ollama", "lmstudio", "anthropic", "gemini", "openai"]
-Permission = Literal["workspace.read"]
+Permission = Literal["workspace.read", "workspace.write", "terminal.execute"]
+ToolName = Literal["workspace.write", "terminal.execute"]
 
 
 class Model(BaseModel):
@@ -287,6 +288,7 @@ class OrchestrationStartInput(Model):
     context_paths: list[Annotated[str, StringConstraints(min_length=1, max_length=4096)]] = Field(
         default_factory=list, max_length=10
     )
+    enabled_tools: list[ToolName] = Field(default_factory=list, max_length=2)
 
     @field_validator("agent_ids")
     @classmethod
@@ -302,12 +304,21 @@ class OrchestrationStartInput(Model):
             raise ValueError("Invalid context paths")
         return value
 
+    @field_validator("enabled_tools")
+    @classmethod
+    def unique_tools(cls, value: list[ToolName]) -> list[ToolName]:
+        if len(value) != len(set(value)):
+            raise ValueError("Duplicate tool")
+        return value
+
     @model_validator(mode="after")
     def budget_covers_minimum_team(self):
         if self.max_model_calls < self.rounds * 2 + 1:
             raise ValueError("Model çağrısı bütçesi iki ajan ve sentez için yetersiz")
         if self.context_paths and not self.workspace_id:
             raise ValueError("Bağlam dosyaları için çalışma alanı gerekli")
+        if self.enabled_tools and not self.workspace_id:
+            raise ValueError("Araç kullanımı için çalışma alanı gerekli")
         return self
 
 
@@ -360,6 +371,16 @@ class OrchestrationMessage(Model):
     content: str
 
 
+class ToolAction(Model):
+    tool: ToolName
+    path: str = ""
+    command: list[str] = Field(default_factory=list)
+    preview: str = ""
+    risk: Literal["medium", "high"]
+    status: Literal["waiting", "approved", "rejected", "completed", "failed"]
+    result: str = ""
+
+
 class OrchestrationRun(Model):
     run_id: str
     objective: str
@@ -378,6 +399,8 @@ class OrchestrationRun(Model):
     price_catalog_version: str
     workspace_id: str | None
     context_paths: list[str]
+    enabled_tools: list[ToolName]
+    tool_action: ToolAction | None
     status: OrchestrationStatus
     error: str
     messages: list[OrchestrationMessage]
@@ -448,9 +471,14 @@ class OrchestrationApprovalRequired(Model):
     type: Literal["orchestration_approval_required"] = "orchestration_approval_required"
     run_id: str
     sequence: int
-    permission: Literal["workspace.read"] = "workspace.read"
+    permission: Permission
     workspace_id: str
-    paths: list[str]
+    paths: list[str] = Field(default_factory=list)
+    tool: ToolName | None = None
+    path: str = ""
+    command: list[str] = Field(default_factory=list)
+    preview: str = ""
+    risk: Literal["medium", "high"] | None = None
     is_final: Literal[False] = False
 
 
@@ -462,6 +490,17 @@ class OrchestrationUsage(Model):
     input_tokens: int
     output_tokens: int
     actual_cost_microusd: int
+    is_final: Literal[False] = False
+
+
+class OrchestrationToolResult(Model):
+    protocol_version: Literal[1] = 1
+    type: Literal["orchestration_tool_result"] = "orchestration_tool_result"
+    run_id: str
+    sequence: int
+    tool: ToolName
+    status: Literal["completed", "failed"]
+    result: str
     is_final: Literal[False] = False
 
 
@@ -490,4 +529,5 @@ class Contract(Model):
     response: Response
     event: Union[StreamEvent, OrchestrationChunk, OrchestrationMessageEnd,
                  OrchestrationEnd, OrchestrationError, OrchestrationRoute,
-                 OrchestrationApprovalRequired, OrchestrationUsage]
+                 OrchestrationApprovalRequired, OrchestrationUsage,
+                 OrchestrationToolResult]

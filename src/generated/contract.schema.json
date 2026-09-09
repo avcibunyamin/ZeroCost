@@ -47,7 +47,11 @@
         },
         "permissions": {
           "items": {
-            "const": "workspace.read",
+            "enum": [
+              "workspace.read",
+              "workspace.write",
+              "terminal.execute"
+            ],
             "type": "string"
           },
           "title": "Permissions",
@@ -113,7 +117,11 @@
         },
         "permissions": {
           "items": {
-            "const": "workspace.read",
+            "enum": [
+              "workspace.read",
+              "workspace.write",
+              "terminal.execute"
+            ],
             "type": "string"
           },
           "maxItems": 8,
@@ -708,8 +716,11 @@
           "type": "integer"
         },
         "permission": {
-          "const": "workspace.read",
-          "default": "workspace.read",
+          "enum": [
+            "workspace.read",
+            "workspace.write",
+            "terminal.execute"
+          ],
           "title": "Permission",
           "type": "string"
         },
@@ -723,6 +734,55 @@
           },
           "title": "Paths",
           "type": "array"
+        },
+        "tool": {
+          "anyOf": [
+            {
+              "enum": [
+                "workspace.write",
+                "terminal.execute"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool"
+        },
+        "path": {
+          "default": "",
+          "title": "Path",
+          "type": "string"
+        },
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Command",
+          "type": "array"
+        },
+        "preview": {
+          "default": "",
+          "title": "Preview",
+          "type": "string"
+        },
+        "risk": {
+          "anyOf": [
+            {
+              "enum": [
+                "medium",
+                "high"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Risk"
         },
         "is_final": {
           "const": false,
@@ -739,6 +799,11 @@
         "permission",
         "workspace_id",
         "paths",
+        "tool",
+        "path",
+        "command",
+        "preview",
+        "risk",
         "is_final"
       ],
       "title": "OrchestrationApprovalRequired",
@@ -1240,6 +1305,27 @@
           "title": "Context Paths",
           "type": "array"
         },
+        "enabled_tools": {
+          "items": {
+            "enum": [
+              "workspace.write",
+              "terminal.execute"
+            ],
+            "type": "string"
+          },
+          "title": "Enabled Tools",
+          "type": "array"
+        },
+        "tool_action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolAction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "status": {
           "enum": [
             "running",
@@ -1282,6 +1368,8 @@
         "price_catalog_version",
         "workspace_id",
         "context_paths",
+        "enabled_tools",
+        "tool_action",
         "status",
         "error",
         "messages"
@@ -1375,6 +1463,18 @@
           "maxItems": 10,
           "title": "Context Paths",
           "type": "array"
+        },
+        "enabled_tools": {
+          "items": {
+            "enum": [
+              "workspace.write",
+              "terminal.execute"
+            ],
+            "type": "string"
+          },
+          "maxItems": 2,
+          "title": "Enabled Tools",
+          "type": "array"
         }
       },
       "required": [
@@ -1387,7 +1487,8 @@
         "max_output_tokens",
         "max_cost_microusd",
         "workspace_id",
-        "context_paths"
+        "context_paths",
+        "enabled_tools"
       ],
       "title": "OrchestrationStartInput",
       "type": "object"
@@ -1422,6 +1523,69 @@
         "params"
       ],
       "title": "OrchestrationStartRequest",
+      "type": "object"
+    },
+    "OrchestrationToolResult": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "type": {
+          "const": "orchestration_tool_result",
+          "default": "orchestration_tool_result",
+          "title": "Type",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "tool": {
+          "enum": [
+            "workspace.write",
+            "terminal.execute"
+          ],
+          "title": "Tool",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "result": {
+          "title": "Result",
+          "type": "string"
+        },
+        "is_final": {
+          "const": false,
+          "default": false,
+          "title": "Is Final",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "type",
+        "run_id",
+        "sequence",
+        "tool",
+        "status",
+        "result",
+        "is_final"
+      ],
+      "title": "OrchestrationToolResult",
       "type": "object"
     },
     "OrchestrationUsage": {
@@ -1881,6 +2045,71 @@
         "result"
       ],
       "title": "Success",
+      "type": "object"
+    },
+    "ToolAction": {
+      "additionalProperties": false,
+      "properties": {
+        "tool": {
+          "enum": [
+            "workspace.write",
+            "terminal.execute"
+          ],
+          "title": "Tool",
+          "type": "string"
+        },
+        "path": {
+          "default": "",
+          "title": "Path",
+          "type": "string"
+        },
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Command",
+          "type": "array"
+        },
+        "preview": {
+          "default": "",
+          "title": "Preview",
+          "type": "string"
+        },
+        "risk": {
+          "enum": [
+            "medium",
+            "high"
+          ],
+          "title": "Risk",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "waiting",
+            "approved",
+            "rejected",
+            "completed",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "result": {
+          "default": "",
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "path",
+        "command",
+        "preview",
+        "risk",
+        "status",
+        "result"
+      ],
+      "title": "ToolAction",
       "type": "object"
     },
     "TransportError": {
@@ -2387,6 +2616,9 @@
         },
         {
           "$ref": "#/$defs/OrchestrationUsage"
+        },
+        {
+          "$ref": "#/$defs/OrchestrationToolResult"
         }
       ],
       "title": "Event"

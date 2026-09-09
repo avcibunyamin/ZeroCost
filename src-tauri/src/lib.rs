@@ -115,6 +115,7 @@ impl Sidecar {
                             | "orchestration_route"
                             | "orchestration_approval_required"
                             | "orchestration_usage"
+                            | "orchestration_tool_result"
                     ) {
                         break;
                     }

@@ -28,6 +28,8 @@ import type {
   ConnectionInput,
   AgentInput,
   WorkspaceInput,
+  Permission,
+  AgentPermissionsInput,
 } from "./generated/contract";
 import "./App.css";
 import { Chat } from "./Chat";
@@ -134,23 +136,22 @@ export default function App() {
     setNotice("");
     setModal(value);
   };
-  async function toggleWorkspaceRead(agentId: string, enabled: boolean) {
+  async function togglePermission(agentId: string, permission: Permission) {
     setLoading(true);
     setError("");
-    const permissions: [] | ["workspace.read"] = enabled
-      ? []
-      : ["workspace.read"];
+    const agent = snapshot?.agents.find((item) => item.id === agentId);
+    const permissions = agent?.permissions.includes(permission)
+      ? agent.permissions.filter((item) => item !== permission)
+      : [...(agent?.permissions ?? []), permission];
     try {
       setSnapshot(
         await send({
           method: "agent.permissions.set",
-          params: { agent_id: agentId, permissions },
+          params: { agent_id: agentId, permissions: permissions as AgentPermissionsInput["permissions"] },
         }),
       );
       setNotice(
-        enabled
-          ? "Çalışma alanı okuma izni kaldırıldı."
-          : "Çalışma alanı okuma izni verildi.",
+        permissions.includes(permission) ? "Ajan izni verildi." : "Ajan izni kaldırıldı.",
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -217,21 +218,16 @@ export default function App() {
             }
           </div>
           <footer>
-            <button
-              className="permission-button"
-              disabled={loading}
-              onClick={() =>
-                void toggleWorkspaceRead(
-                  agent.id,
-                  agent.permissions.includes("workspace.read"),
-                )
-              }
-            >
-              <ShieldCheck size={14} />
-              {agent.permissions.includes("workspace.read")
-                ? "Workspace okuma açık"
-                : "Workspace okuma kapalı"}
-            </button>
+            {(["workspace.read", "workspace.write", "terminal.execute"] as Permission[]).map(
+              (permission) => (
+                <button className="permission-button" disabled={loading} key={permission}
+                  onClick={() => void togglePermission(agent.id, permission)}>
+                  <ShieldCheck size={14} />
+                  {permission === "workspace.read" ? "Okuma" : permission === "workspace.write" ? "Yazma" : "Terminal"}
+                  {agent.permissions.includes(permission) ? " açık" : " kapalı"}
+                </button>
+              ),
+            )}
           </footer>
         </article>
       ))}
@@ -555,8 +551,8 @@ export default function App() {
               <div className="development-note">
                 <CircleHelp size={16} />
                 <span>
-                  LangGraph ajan masası ve kontrollü workspace okuma hazır.
-                  Yazma ve terminal araçları henüz kapalıdır.
+                  LangGraph ajan masası; onaylı workspace okuma, atomik yazma
+                  ve sınırlandırılmış terminal araçları hazır.
                 </span>
               </div>
             </>

@@ -31,7 +31,7 @@ test("orchestration and workspace responses are closed", () => {
         max_cost_microusd: 5000000, estimated_max_cost_microusd: 0,
         actual_cost_microusd: 0, input_tokens: 0, output_tokens: 0,
         price_catalog_version: "2026-09-09",
-        workspace_id: null, context_paths: [],
+        workspace_id: null, context_paths: [], enabled_tools: [], tool_action: null,
         status: "completed", error: "", messages: [
           { sequence: 1, agent_id: "a", phase: "analysis", content: "view" },
         ],
@@ -72,7 +72,11 @@ test("orchestration stream attributes every chunk", () => {
     sequence: 2, status: "completed", is_final: true }), true);
   assert.equal(validateEvent({ protocol_version: 1, type: "orchestration_approval_required",
     run_id: "run", sequence: 2, permission: "workspace.read", workspace_id: "w",
-    paths: ["README.md"], is_final: false }), true);
+    paths: ["README.md"], tool: null, path: "", command: [], preview: "", risk: null,
+    is_final: false }), true);
+  assert.equal(validateEvent({ protocol_version: 1, type: "orchestration_tool_result",
+    run_id: "run", sequence: 3, tool: "workspace.write", status: "completed",
+    result: "written", is_final: false }), true);
 });
 const valid = {
   protocol_version: 1,

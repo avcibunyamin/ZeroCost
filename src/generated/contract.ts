@@ -48,30 +48,55 @@ export type AgentId = string;
  */
 export type Permissions =
   | []
-  | ["workspace.read"]
-  | ["workspace.read", "workspace.read"]
-  | ["workspace.read", "workspace.read", "workspace.read"]
-  | ["workspace.read", "workspace.read", "workspace.read", "workspace.read"]
-  | ["workspace.read", "workspace.read", "workspace.read", "workspace.read", "workspace.read"]
-  | ["workspace.read", "workspace.read", "workspace.read", "workspace.read", "workspace.read", "workspace.read"]
+  | ["workspace.read" | "workspace.write" | "terminal.execute"]
   | [
-      "workspace.read",
-      "workspace.read",
-      "workspace.read",
-      "workspace.read",
-      "workspace.read",
-      "workspace.read",
-      "workspace.read"
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute"
     ]
   | [
-      "workspace.read",
-      "workspace.read",
-      "workspace.read",
-      "workspace.read",
-      "workspace.read",
-      "workspace.read",
-      "workspace.read",
-      "workspace.read"
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute"
+    ]
+  | [
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute"
+    ]
+  | [
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute"
+    ]
+  | [
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute"
+    ]
+  | [
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute"
+    ]
+  | [
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute",
+      "workspace.read" | "workspace.write" | "terminal.execute"
     ];
 export type ProtocolVersion5 = 1;
 export type RequestId5 = string;
@@ -136,6 +161,13 @@ export type ContextPaths =
   | [string, string, string, string, string, string, string, string]
   | [string, string, string, string, string, string, string, string, string]
   | [string, string, string, string, string, string, string, string, string, string];
+/**
+ * @maxItems 2
+ */
+export type EnabledTools =
+  | []
+  | ["workspace.write" | "terminal.execute"]
+  | ["workspace.write" | "terminal.execute", "workspace.write" | "terminal.execute"];
 export type ProtocolVersion13 = 1;
 export type RequestId13 = string;
 export type Method13 = "orchestration.cancel";
@@ -178,7 +210,7 @@ export type Role1 = string;
 export type ConnectionId2 = string;
 export type Instructions1 = string;
 export type Id1 = string;
-export type Permissions1 = "workspace.read"[];
+export type Permissions1 = ("workspace.read" | "workspace.write" | "terminal.execute")[];
 export type Agents = Agent[];
 export type Name5 = string;
 export type Path2 = string;
@@ -226,7 +258,15 @@ export type OutputTokens = number;
 export type PriceCatalogVersion = string;
 export type WorkspaceId4 = string | null;
 export type ContextPaths1 = string[];
-export type Status2 = "running" | "waiting_approval" | "completed" | "cancelled" | "failed" | "interrupted";
+export type EnabledTools1 = ("workspace.write" | "terminal.execute")[];
+export type Tool = "workspace.write" | "terminal.execute";
+export type Path6 = string;
+export type Command = string[];
+export type Preview = string;
+export type Risk = "medium" | "high";
+export type Status2 = "waiting" | "approved" | "rejected" | "completed" | "failed";
+export type Result1 = string;
+export type Status3 = "running" | "waiting_approval" | "completed" | "cancelled" | "failed" | "interrupted";
 export type Error1 = string;
 export type Sequence = number;
 export type AgentId5 = string;
@@ -257,7 +297,8 @@ export type Event =
   | OrchestrationError
   | OrchestrationRoute
   | OrchestrationApprovalRequired
-  | OrchestrationUsage;
+  | OrchestrationUsage
+  | OrchestrationToolResult;
 export type ProtocolVersion20 = 1;
 export type Type = "stream_chunk";
 export type RunId7 = string;
@@ -269,7 +310,7 @@ export type Type1 = "stream_end";
 export type RunId8 = string;
 export type Sequence2 = number;
 export type FullContent = string;
-export type Status3 = "completed" | "cancelled";
+export type Status4 = "completed" | "cancelled";
 export type IsFinal1 = true;
 export type ProtocolVersion22 = 1;
 export type Type2 = "stream_error";
@@ -301,7 +342,7 @@ export type ProtocolVersion26 = 1;
 export type Type6 = "orchestration_end";
 export type RunId12 = string;
 export type Sequence6 = number;
-export type Status4 = "completed" | "cancelled";
+export type Status5 = "completed" | "cancelled";
 export type IsFinal5 = true;
 export type ProtocolVersion27 = 1;
 export type Type7 = "orchestration_error";
@@ -326,9 +367,14 @@ export type ProtocolVersion29 = 1;
 export type Type9 = "orchestration_approval_required";
 export type RunId15 = string;
 export type Sequence9 = number;
-export type Permission = "workspace.read";
+export type Permission = "workspace.read" | "workspace.write" | "terminal.execute";
 export type WorkspaceId5 = string;
 export type Paths = string[];
+export type Tool1 = ("workspace.write" | "terminal.execute") | null;
+export type Path7 = string;
+export type Command1 = string[];
+export type Preview1 = string;
+export type Risk1 = ("medium" | "high") | null;
 export type IsFinal8 = false;
 export type ProtocolVersion30 = 1;
 export type Type10 = "orchestration_usage";
@@ -338,6 +384,14 @@ export type InputTokens1 = number;
 export type OutputTokens1 = number;
 export type ActualCostMicrousd1 = number;
 export type IsFinal9 = false;
+export type ProtocolVersion31 = 1;
+export type Type11 = "orchestration_tool_result";
+export type RunId17 = string;
+export type Sequence11 = number;
+export type Tool2 = "workspace.write" | "terminal.execute";
+export type Status6 = "completed" | "failed";
+export type Result2 = string;
+export type IsFinal10 = false;
 
 export interface Contract {
   request: Request;
@@ -563,6 +617,7 @@ export interface OrchestrationStartInput {
   max_cost_microusd: MaxCostMicrousd;
   workspace_id: WorkspaceId1;
   context_paths: ContextPaths;
+  enabled_tools: EnabledTools;
 }
 /**
  * This interface was referenced by `Contract`'s JSON-Schema
@@ -772,9 +827,24 @@ export interface OrchestrationRun {
   price_catalog_version: PriceCatalogVersion;
   workspace_id: WorkspaceId4;
   context_paths: ContextPaths1;
-  status: Status2;
+  enabled_tools: EnabledTools1;
+  tool_action: ToolAction | null;
+  status: Status3;
   error: Error1;
   messages: Messages;
+}
+/**
+ * This interface was referenced by `Contract`'s JSON-Schema
+ * via the `definition` "ToolAction".
+ */
+export interface ToolAction {
+  tool: Tool;
+  path: Path6;
+  command: Command;
+  preview: Preview;
+  risk: Risk;
+  status: Status2;
+  result: Result1;
 }
 /**
  * This interface was referenced by `Contract`'s JSON-Schema
@@ -842,7 +912,7 @@ export interface StreamEnd {
   run_id: RunId8;
   sequence: Sequence2;
   full_content: FullContent;
-  status: Status3;
+  status: Status4;
   is_final: IsFinal1;
 }
 /**
@@ -904,7 +974,7 @@ export interface OrchestrationEnd {
   type: Type6;
   run_id: RunId12;
   sequence: Sequence6;
-  status: Status4;
+  status: Status5;
   is_final: IsFinal5;
 }
 /**
@@ -950,6 +1020,11 @@ export interface OrchestrationApprovalRequired {
   permission: Permission;
   workspace_id: WorkspaceId5;
   paths: Paths;
+  tool: Tool1;
+  path: Path7;
+  command: Command1;
+  preview: Preview1;
+  risk: Risk1;
   is_final: IsFinal8;
 }
 /**
@@ -965,4 +1040,18 @@ export interface OrchestrationUsage {
   output_tokens: OutputTokens1;
   actual_cost_microusd: ActualCostMicrousd1;
   is_final: IsFinal9;
+}
+/**
+ * This interface was referenced by `Contract`'s JSON-Schema
+ * via the `definition` "OrchestrationToolResult".
+ */
+export interface OrchestrationToolResult {
+  protocol_version: ProtocolVersion31;
+  type: Type11;
+  run_id: RunId17;
+  sequence: Sequence11;
+  tool: Tool2;
+  status: Status6;
+  result: Result2;
+  is_final: IsFinal10;
 }

@@ -6,7 +6,7 @@ import sqlite3
 from uuid import uuid4
 from .models import Agent, AgentInput, Connection, ConnectionInput, Snapshot, Workspace, WorkspaceInput
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 class Store:
@@ -137,6 +137,29 @@ class Store:
                 self.db.execute("ALTER TABLE orchestration_runs ADD COLUMN price_catalog_version TEXT NOT NULL DEFAULT '2026-09-09'")
                 self.db.execute("PRAGMA user_version=6")
 
+        if current < 7:
+            self.db.executescript("""
+                BEGIN IMMEDIATE;
+                CREATE TABLE agent_permissions_v7 (
+                    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+                    permission TEXT NOT NULL CHECK(permission IN ('workspace.read','workspace.write','terminal.execute')),
+                    PRIMARY KEY(agent_id, permission)
+                );
+                INSERT INTO agent_permissions_v7 SELECT * FROM agent_permissions;
+                DROP TABLE agent_permissions;
+                ALTER TABLE agent_permissions_v7 RENAME TO agent_permissions;
+                ALTER TABLE orchestration_runs ADD COLUMN enabled_tools TEXT NOT NULL DEFAULT '[]';
+                ALTER TABLE orchestration_runs ADD COLUMN tool_name TEXT NOT NULL DEFAULT '';
+                ALTER TABLE orchestration_runs ADD COLUMN tool_request TEXT NOT NULL DEFAULT '{}';
+                ALTER TABLE orchestration_runs ADD COLUMN tool_preview TEXT NOT NULL DEFAULT '';
+                ALTER TABLE orchestration_runs ADD COLUMN tool_risk TEXT NOT NULL DEFAULT '';
+                ALTER TABLE orchestration_runs ADD COLUMN tool_status TEXT NOT NULL DEFAULT '';
+                ALTER TABLE orchestration_runs ADD COLUMN tool_result TEXT NOT NULL DEFAULT '';
+                ALTER TABLE orchestration_runs ADD COLUMN event_sequence INTEGER NOT NULL DEFAULT 0;
+                PRAGMA user_version=7;
+                COMMIT;
+            """)
+
     def close(self):
         self.db.close()
 
@@ -208,16 +231,17 @@ class Store:
                             max_cost_microusd: int = 5_000_000,
                             estimated_max_cost_microusd: int = 0,
                             price_catalog_version: str = '2026-09-09', workspace_id: str | None = None,
-                            context_paths: list[str] | None = None):
+                            context_paths: list[str] | None = None,
+                            enabled_tools: list[str] | None = None):
         with self.db:
             self.db.execute("""INSERT INTO orchestration_runs
                 (run_id,objective,rounds,status,routing_mode,route_reason,max_model_calls,
                  max_output_tokens,workspace_id,context_paths,max_cost_microusd,
-                 estimated_max_cost_microusd,price_catalog_version)
-                VALUES (?,?,?,'running',?,?,?,?,?,?,?,?,?)""",
+                 estimated_max_cost_microusd,price_catalog_version,enabled_tools)
+                VALUES (?,?,?,'running',?,?,?,?,?,?,?,?,?,?)""",
                 (run_id, objective, rounds, routing_mode, route_reason, max_model_calls,
                  max_output_tokens, workspace_id, json.dumps(context_paths or []), max_cost_microusd,
-                 estimated_max_cost_microusd, price_catalog_version))
+                 estimated_max_cost_microusd, price_catalog_version, json.dumps(enabled_tools or [])))
             self.db.executemany("INSERT INTO orchestration_participants VALUES (?,?,?)",
                                 [(run_id, agent_id, position) for position, agent_id in enumerate(agent_ids)])
 
@@ -250,13 +274,32 @@ class Store:
             FROM orchestration_runs WHERE run_id=?""", (run_id,)).fetchone()
         return dict(row)
 
+    def set_tool_action(self, run_id: str, proposal: dict, status: str = 'waiting', result: str = ''):
+        public = {key: proposal.get(key) for key in ('tool', 'path', 'command', 'cwd', 'workspace_id', 'agent_id')}
+        with self.db:
+            self.db.execute("""UPDATE orchestration_runs SET tool_name=?,tool_request=?,
+                tool_preview=?,tool_risk=?,tool_status=?,tool_result=? WHERE run_id=?""",
+                (proposal['tool'], json.dumps(public), proposal['preview'], proposal['risk'],
+                 status, result, run_id))
+
+    def update_tool_action(self, run_id: str, status: str, result: str = ''):
+        with self.db:
+            self.db.execute("UPDATE orchestration_runs SET tool_status=?,tool_result=? WHERE run_id=?",
+                            (status, result[:65536], run_id))
+
+    def set_event_sequence(self, run_id: str, sequence: int):
+        with self.db:
+            self.db.execute("UPDATE orchestration_runs SET event_sequence=? WHERE run_id=?",
+                            (sequence, run_id))
+
     def orchestration_spec(self, run_id: str):
         row = self.db.execute("SELECT * FROM orchestration_runs WHERE run_id=?", (run_id,)).fetchone()
         if row is None:
             return None
         agent_ids = [item[0] for item in self.db.execute(
             "SELECT agent_id FROM orchestration_participants WHERE run_id=? ORDER BY position", (run_id,))]
-        return {**dict(row), 'agent_ids': agent_ids, 'context_paths': json.loads(row['context_paths'])}
+        return {**dict(row), 'agent_ids': agent_ids, 'context_paths': json.loads(row['context_paths']),
+                'enabled_tools': json.loads(row['enabled_tools'])}
 
     def waiting_orchestration(self):
         row = self.db.execute("""SELECT run_id FROM orchestration_runs
@@ -264,7 +307,7 @@ class Store:
         return row['run_id'] if row else None
 
     def orchestration_history(self):
-        from .models import OrchestrationHistory, OrchestrationMessage, OrchestrationRun
+        from .models import OrchestrationHistory, OrchestrationMessage, OrchestrationRun, ToolAction
         runs = []
         rows = self.db.execute("SELECT * FROM orchestration_runs ORDER BY created_at DESC,rowid DESC LIMIT 20")
         for row in rows:
@@ -273,6 +316,12 @@ class Store:
             messages = [OrchestrationMessage(**dict(item)) for item in self.db.execute(
                 "SELECT sequence,agent_id,phase,content FROM orchestration_messages WHERE run_id=? ORDER BY sequence",
                 (row['run_id'],))]
+            tool_action = None
+            if row['tool_name']:
+                request = json.loads(row['tool_request'])
+                tool_action = ToolAction(tool=row['tool_name'], path=request.get('path') or '',
+                    command=request.get('command') or [], preview=row['tool_preview'],
+                    risk=row['tool_risk'], status=row['tool_status'], result=row['tool_result'])
             runs.append(OrchestrationRun(run_id=row['run_id'], objective=row['objective'], rounds=row['rounds'],
                                          status=row['status'], error=row['error'], agent_ids=agent_ids,
                                          routing_mode=row['routing_mode'], route_reason=row['route_reason'],
@@ -285,5 +334,7 @@ class Store:
                                          input_tokens=row['input_tokens'], output_tokens=row['output_tokens'],
                                          price_catalog_version=row['price_catalog_version'],
                                          workspace_id=row['workspace_id'],
-                                         context_paths=json.loads(row['context_paths']), messages=messages))
+                                         context_paths=json.loads(row['context_paths']),
+                                         enabled_tools=json.loads(row['enabled_tools']),
+                                         tool_action=tool_action, messages=messages))
         return OrchestrationHistory(runs=runs)

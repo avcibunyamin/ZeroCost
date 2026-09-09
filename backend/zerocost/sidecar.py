@@ -161,6 +161,12 @@ class ChatService:
                                                             self.provider_factory)
                 routed_ids, reason, planned = self.orchestrator.route(params, snapshot)
                 params = params.model_copy(update={'agent_ids': routed_ids})
+                if params.enabled_tools:
+                    coordinator = next(agent for agent in snapshot.agents
+                                       if agent.id == params.agent_ids[0])
+                    missing = [tool for tool in params.enabled_tools if tool not in coordinator.permissions]
+                    if missing:
+                        raise ValueError(f'{coordinator.name} için {", ".join(missing)} izni gerekli.')
                 context_bytes = sum(inspect_file_size(
                     self.store, agents[0].id, params.workspace_id, path)
                     for path in params.context_paths) if params.context_paths else 0
@@ -176,7 +182,8 @@ class ChatService:
                     max_cost_microusd=params.max_cost_microusd,
                     estimated_max_cost_microusd=estimated_cost,
                     price_catalog_version=CATALOG_VERSION,
-                    workspace_id=params.workspace_id, context_paths=params.context_paths)
+                    workspace_id=params.workspace_id, context_paths=params.context_paths,
+                    enabled_tools=params.enabled_tools)
                 self.output(OrchestrationRoute(run_id=params.run_id, sequence=1,
                     agent_ids=params.agent_ids, reason=reason, planned_model_calls=planned,
                     max_model_calls=params.max_model_calls, max_output_tokens=params.max_output_tokens,
@@ -209,7 +216,8 @@ class ChatService:
                 params = SimpleNamespace(**spec)
                 self.store.set_orchestration_status(params.run_id, 'running')
                 task = asyncio.create_task(self.run_orchestration(
-                    params, credentials, resume=request.params.decision, initial_sequence=2))
+                    params, credentials, resume=request.params.decision,
+                    initial_sequence=spec['event_sequence']))
                 self.tasks[params.run_id] = task
                 task.add_done_callback(lambda _: self.tasks.pop(params.run_id, None))
                 result = Accepted(run_id=params.run_id)

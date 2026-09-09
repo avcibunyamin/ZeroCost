@@ -17,7 +17,16 @@ type StreamingMessage = {
   content: string;
 };
 
-type Approval = { workspaceId: string; paths: string[] };
+type Approval = {
+  permission: "workspace.read" | "workspace.write" | "terminal.execute";
+  workspaceId: string;
+  paths: string[];
+  tool: "workspace.write" | "terminal.execute" | null;
+  path: string;
+  command: string[];
+  preview: string;
+  risk: "medium" | "high" | null;
+};
 
 export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
   const [selected, setSelected] = useState<string[]>([]);
@@ -29,6 +38,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
   const [maxCostUsd, setMaxCostUsd] = useState(5);
   const [workspaceId, setWorkspaceId] = useState("");
   const [contextInput, setContextInput] = useState("");
+  const [enabledTools, setEnabledTools] = useState<("workspace.write" | "terminal.execute")[]>([]);
   const [runs, setRuns] = useState<OrchestrationRun[]>([]);
   const [catalog, setCatalog] = useState<PricingCatalog | null>(null);
   const [streaming, setStreaming] = useState<StreamingMessage | null>(null);
@@ -50,10 +60,14 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       runId.current = pending.run_id;
       setActive(true);
       if (pending.status === "waiting_approval" && pending.workspace_id)
-        setApproval({
+        setApproval(pending.tool_action ? {
+          permission: pending.tool_action.tool,
           workspaceId: pending.workspace_id,
-          paths: pending.context_paths,
-        });
+          paths: [], tool: pending.tool_action.tool,
+          path: pending.tool_action.path, command: pending.tool_action.command,
+          preview: pending.tool_action.preview, risk: pending.tool_action.risk,
+        } : { permission: "workspace.read", workspaceId: pending.workspace_id,
+          paths: pending.context_paths, tool: null, path: "", command: [], preview: "", risk: null });
     }
   }
 
@@ -156,8 +170,14 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
         );
       } else if (payload.type === "orchestration_approval_required") {
         setApproval({
+          permission: payload.permission,
           workspaceId: payload.workspace_id,
           paths: payload.paths,
+          tool: payload.tool,
+          path: payload.path,
+          command: payload.command,
+          preview: payload.preview,
+          risk: payload.risk,
         });
         setRuns((items) =>
           items.map((run) =>
@@ -166,6 +186,10 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               : run,
           ),
         );
+      } else if (payload.type === "orchestration_tool_result") {
+        setRuns((items) => items.map((run) => run.run_id === payload.run_id && run.tool_action
+          ? { ...run, tool_action: { ...run.tool_action, status: payload.status, result: payload.result } }
+          : run));
       } else {
         if (payload.type === "orchestration_error") setError(payload.message);
         setActive(false);
@@ -223,6 +247,8 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       used_model_calls: 0,
       workspace_id: workspaceId || null,
       context_paths: contextPaths,
+      enabled_tools: enabledTools,
+      tool_action: null,
       status: "running",
       error: "",
       messages: [],
@@ -247,6 +273,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
           workspace_id: workspaceId || null,
           context_paths:
             contextPaths as OrchestrationStartInput["context_paths"],
+          enabled_tools: enabledTools as OrchestrationStartInput["enabled_tools"],
         },
       });
     } catch (e) {
@@ -312,6 +339,9 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
           .find((agent) => agent.id === id)
           ?.permissions.includes("workspace.read"),
     );
+  const missingToolPermission = enabledTools.some((tool) =>
+    selected.some((id) => !snapshot?.agents.find((agent) => agent.id === id)?.permissions.includes(tool)),
+  );
   return (
     <>
       <div className="page-heading">
@@ -470,19 +500,42 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               </small>
             </label>
           )}
+          {workspaceId && (
+            <fieldset disabled={active}>
+              <legend>Model araç önerileri</legend>
+              {(["workspace.write", "terminal.execute"] as const).map((tool) => (
+                <label className="agent-choice" key={tool}>
+                  <input type="checkbox" checked={enabledTools.includes(tool)}
+                    onChange={() => setEnabledTools((current) => current.includes(tool)
+                      ? current.filter((item) => item !== tool) : [...current, tool])} />
+                  <span><strong>{tool}</strong><small>Her çalıştırmada somut önizleme ve onay gerekir.</small></span>
+                </label>
+              ))}
+            </fieldset>
+          )}
           {missingReadPermission && (
             <div className="form-error">
               Seçili tüm ajanlara Ajanlar ekranından workspace okuma izni verin.
             </div>
           )}
+          {missingToolPermission && <div className="form-error">
+            Seçili ajanların araç izinlerini Ajanlar ekranından açın.
+          </div>}
           {approval && (
             <div className="approval-card" role="alert">
               <div>
                 <ShieldCheck size={20} />
-                <strong>Dosya okuma onayı</strong>
+                <strong>{approval.permission === "workspace.read" ? "Dosya okuma onayı" : "Araç çalıştırma onayı"}</strong>
               </div>
-              <p>Ajanlar şu dosyaları yalnız bu görev için okuyacak:</p>
-              <ul>{approval.paths.map((path) => <li key={path}>{path}</li>)}</ul>
+              {approval.permission === "workspace.read" ? <>
+                <p>Ajanlar şu dosyaları yalnız bu görev için okuyacak:</p>
+                <ul>{approval.paths.map((path) => <li key={path}>{path}</li>)}</ul>
+              </> : <>
+                <p>{approval.tool} · risk: {approval.risk}</p>
+                {approval.path && <code>{approval.path}</code>}
+                {approval.command.length > 0 && <code>argv: {JSON.stringify(approval.command)}</code>}
+                <pre>{approval.preview}</pre>
+              </>}
               <div className="approval-actions">
                 <button type="button" className="button primary"
                   onClick={() => void decide("approve")} disabled={stopping}>
@@ -518,6 +571,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
                 maxCostUsd < 0 ||
                 maxCostUsd > 1000 ||
                 missingReadPermission ||
+                missingToolPermission ||
                 (contextRequested && !workspaceId)
               }
             >
@@ -568,6 +622,10 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
             </article>
           ))}
           {current?.error && <div className="form-error">{current.error}</div>}
+          {current?.tool_action && <div className="approval-card">
+            <strong>{current.tool_action.tool} · {current.tool_action.status}</strong>
+            {current.tool_action.result && <pre>{current.tool_action.result}</pre>}
+          </div>}
         </section>
       </div>
     </>

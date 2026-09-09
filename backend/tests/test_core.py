@@ -11,6 +11,8 @@ from zerocost.sidecar import ChatService, dispatch
 from zerocost.storage import Store
 from zerocost.providers.base import Message, ProviderError
 from zerocost.pricing import TokenUsage
+from zerocost.workspace_tools import apply_write, prepare_write
+from zerocost.terminal_tools import execute_command, prepare_command
 
 
 @pytest.fixture
@@ -171,11 +173,51 @@ def test_v4_orchestration_migrates_with_budget_defaults(tmp_path):
 
     migrated = Store(path)
     run = migrated.orchestration_history().runs[0]
-    assert migrated.snapshot().database_version == 6
+    assert migrated.snapshot().database_version == 7
     assert run.routing_mode == 'manual' and run.max_model_calls == 5
     assert run.agent_ids == [a.id for a in agents]
     assert migrated.db.execute('PRAGMA foreign_key_check').fetchall() == []
     migrated.close()
+
+
+def test_atomic_workspace_write_rechecks_hash_and_rejects_symlink(tmp_path):
+    root = tmp_path / 'project'
+    root.mkdir()
+    target = root / 'notes.md'
+    target.write_text('eski\n', encoding='utf-8')
+    store, agent = configured_store(tmp_path)
+    store.create_workspace(WorkspaceInput(name='Project', path=str(root)))
+    workspace = store.snapshot().workspaces[0]
+    store.set_agent_permissions(agent.id, ['workspace.write'])
+    proposal = prepare_write(store, agent.id, workspace.id, 'notes.md', 'yeni\n')
+    assert '-eski' in proposal['preview'] and '+yeni' in proposal['preview']
+    target.write_text('arada değişti\n', encoding='utf-8')
+    with pytest.raises(ValueError, match='onay beklerken değişti'):
+        apply_write(store, proposal)
+    target.write_text('eski\n', encoding='utf-8')
+    outside = tmp_path / 'outside.md'
+    outside.write_text('dışarı', encoding='utf-8')
+    target.unlink()
+    target.symlink_to(outside)
+    with pytest.raises(ValueError, match='Sembolik'):
+        prepare_write(store, agent.id, workspace.id, 'notes.md', 'kaçış')
+    store.close()
+
+
+def test_terminal_is_argv_only_workspace_bounded_and_allowlisted(tmp_path):
+    async def scenario():
+        root = tmp_path / 'project'
+        root.mkdir()
+        store, agent = configured_store(tmp_path)
+        store.create_workspace(WorkspaceInput(name='Project', path=str(root)))
+        workspace = store.snapshot().workspaces[0]
+        store.set_agent_permissions(agent.id, ['terminal.execute'])
+        proposal = prepare_command(store, agent.id, workspace.id, ['pwd'])
+        assert str(root.resolve()) in await execute_command(store, proposal)
+        with pytest.raises(ValueError, match='izin listesinde'):
+            prepare_command(store, agent.id, workspace.id, ['sh', '-c', 'touch escaped'])
+        store.close()
+    asyncio.run(scenario())
 
 
 def test_future_schema_is_not_overwritten(tmp_path):
@@ -376,7 +418,7 @@ def test_multi_agent_workspace_context_requires_every_agent_permission(tmp_path)
         assert accepted.ok
         await service.tasks['context']
         waiting = store.orchestration_history().runs[0]
-        assert waiting.status == 'waiting_approval'
+        assert waiting.status == 'waiting_approval', waiting.error
         assert provider.messages == []
         assert events[-1].type == 'orchestration_approval_required'
         blocked_chat = await service.handle(request('chat.start', run_id='parallel',
@@ -488,5 +530,59 @@ def test_cloud_usage_accumulates_token_based_list_cost(tmp_path):
         assert run.actual_cost_microusd == 15_900
         assert [event.actual_cost_microusd for event in events
                 if event.type == 'orchestration_usage'] == [5300, 10600, 15900]
+        store.close()
+    asyncio.run(scenario())
+
+
+def test_model_write_proposal_waits_for_diff_approval_then_writes(tmp_path):
+    async def scenario():
+        root = tmp_path / 'project'
+        root.mkdir()
+        target = root / 'result.md'
+        target.write_text('eski\n', encoding='utf-8')
+        database = tmp_path / 'tool.sqlite3'
+        store = Store(database)
+        store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+        connection = store.snapshot().connections[0]
+        for name in ('Writer', 'Reviewer'):
+            store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+        store.create_workspace(WorkspaceInput(name='Project', path=str(root)))
+        agents, workspace = store.snapshot().agents, store.snapshot().workspaces[0]
+        for agent in agents:
+            store.set_agent_permissions(agent.id, ['workspace.write'])
+        calls = 0
+        def factory(*_):
+            nonlocal calls
+            calls += 1
+            text = ('Sonuç\n```zerocost-tool\n'
+                    '{"tool":"workspace.write","path":"result.md","content":"yeni\\n"}\n```')
+            return FakeProvider(tokens=(text if calls == 3 else 'görüş',))
+        events = []
+        service = ChatService(store, events.append, factory)
+        started = await service.handle(request('orchestration.start', run_id='write-tool',
+            objective='Dosyayı güncelle', agent_ids=[a.id for a in agents], rounds=1,
+            max_model_calls=3, workspace_id=workspace.id,
+            enabled_tools=['workspace.write']))
+        assert started.ok
+        await service.tasks['write-tool']
+        assert target.read_text() == 'eski\n'
+        waiting = store.orchestration_history().runs[0]
+        assert waiting.status == 'waiting_approval', waiting.error
+        assert waiting.tool_action.status == 'waiting'
+        assert '+yeni' in waiting.tool_action.preview
+        assert events[-1].permission == 'workspace.write'
+        approval_sequence = events[-1].sequence
+        store.close()
+        store = Store(database)
+        service = ChatService(store, events.append, factory)
+        approved = await service.handle(request('orchestration.approve', run_id='write-tool',
+                                                decision='approve'))
+        assert approved.ok
+        await service.tasks['write-tool']
+        assert target.read_text() == 'yeni\n'
+        complete = store.orchestration_history().runs[0]
+        assert complete.status == 'completed' and complete.tool_action.status == 'completed'
+        assert any(event.type == 'orchestration_tool_result' for event in events)
+        assert events[-1].sequence > approval_sequence
         store.close()
     asyncio.run(scenario())
