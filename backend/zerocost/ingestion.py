@@ -5,6 +5,7 @@ import hashlib
 
 from .embeddings import MAX_EMBED_INPUTS
 from .documents import DocumentBlock
+from .chunking import SemanticChunk
 
 INDEX_VERSION = 'zerocost-chunk-v1'
 HASH_VERSION = INDEX_VERSION.encode() + b'\0'
@@ -45,7 +46,7 @@ class KnowledgeIngestor:
 
     async def index_chunks(self, collection_id: str, workspace_id: str, path: str,
                            content: str,
-                           chunks: list[DocumentChunk | DocumentBlock]) -> IndexResult:
+                           chunks: list[DocumentChunk | DocumentBlock | SemanticChunk]) -> IndexResult:
         collection = self.store.knowledge_collection(collection_id)
         if collection is None or self.store.workspace(workspace_id) is None:
             raise ValueError('Bilgi koleksiyonu veya çalışma alanı bulunamadı.')

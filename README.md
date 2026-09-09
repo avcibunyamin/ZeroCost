@@ -79,6 +79,8 @@ SQLite şema v9; koleksiyon, kaynak ve parça tablolarını, Unicode FTS5 tam me
 
 Metin ve Markdown ayrıştırıcısı CRLF/CR satır sonlarını deterministik biçimde normalize eder; kaynak satır numaralarını koruyarak başlık, paragraf, liste, tablo, alıntı, fenced code ve YAML frontmatter blokları üretir. ATX/Setext başlıkları ile başlık hiyerarşisi korunur; code içindeki Markdown işaretleri ayrıştırılmaz. Girdi NUL, 1.000.000 karakter ve 50.000 satır sınırlarıyla çevrelenir. Ayrıştırıcı henüz semantik blokları boyuta göre bölmez; sliding-window/overlap katmanı sonraki dilimdir.
 
+Semantik birleştirici varsayılan 2.400 karakter hedefi ve 3.200 karakter azami sınırıyla komşu küçük blokları paketler. Yeni başlık her zaman yeni bir bölüm başlatır; frontmatter/başlık ilk gövde bloğuyla birlikte tutulur. Hedefe ulaşıldığında doğal blok sınırı tercih edilir. Tek başına büyük paragraf veya code bloğu bu aşamada kesilmez ya da kaybedilmez; açıkça `oversized` işaretlenerek güvenli büyük-blok bölücüsüne bırakılır. Üretilen her chunk satır aralığını, başlık yolunu ve içerdiği blok türlerini taşır.
+
 Embedding API sözleşmesi: [Ollama Embeddings](https://docs.ollama.com/capabilities/embeddings) ve [Ollama `/api/embed`](https://docs.ollama.com/api/embed).
 
 ## Pydantic → TypeScript sözleşmesi
@@ -129,8 +131,9 @@ macOS uygulaması `src-tauri/target/release/bundle/macos/ZeroCost.app` altında 
 
 ## Sonraki geliştirme dilimi
 
-1. Semantik bloklar üzerinde sliding-window/overlap chunking ve kaynak ekleme arayüzü.
-2. Hibrit FTS/vektör sıralaması, kaynak alıntıları ve ajan `knowledge.search` aracı.
-3. Skill paket manifesti, sürümleme ve izin beyanları.
-4. Kesilmiş üretim düğümünü kontrollü yeniden deneme ve kısmi görev devamı.
-5. Sağlayıcı cache/batch tarifeleri ve kullanıcıya özel fiyat profilleri.
+1. Büyük paragraf/code bloklarını güvenli bölme ve sliding-window overlap.
+2. Kaynak ekleme ve indeksleme arayüzü.
+3. Hibrit FTS/vektör sıralaması, kaynak alıntıları ve ajan `knowledge.search` aracı.
+4. Skill paket manifesti, sürümleme ve izin beyanları.
+5. Kesilmiş üretim düğümünü kontrollü yeniden deneme ve kısmi görev devamı.
+6. Sağlayıcı cache/batch tarifeleri ve kullanıcıya özel fiyat profilleri.

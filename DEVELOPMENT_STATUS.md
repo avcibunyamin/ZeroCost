@@ -133,3 +133,12 @@ Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırıl
 - CRLF/CR normalizasyonu; NUL, 1.000.000 karakter ve 50.000 satır sınırları
 - CommonMark lazy liste devamı ve code içindeki Markdown işaretlerini koruma
 - 60 Python ve 9 JavaScript sözleşme testi geçti
+
+## Faz 3 · Semantik blok birleştirme
+
+- Varsayılan 2.400 hedef / 3.200 azami karakterle doğal blok sınırında paketleme
+- Başlık sınırını geçmeyen bölüm izolasyonu; frontmatter/başlığı ilk gövdeyle birlikte tutma
+- Chunk başına kaynak satır aralığı, başlık yolu ve blok türü provenance bilgisi
+- Tek büyük blokta içerik kaybetmeyen açık `oversized` işareti
+- 32 ≤ hedef ≤ azami ≤ 32.000 yapılandırma doğrulaması
+- 67 Python ve 9 JavaScript sözleşme testi geçti
