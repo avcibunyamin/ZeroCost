@@ -56,7 +56,11 @@ SDK entegrasyonları sahte HTTP yanıtlarıyla test edilir; gerçek bulut anahta
 
 **Ajan masası** ekranında 2–4 aday ajan seçilir. Manuel mod seçim sırasını korur. Otomatik mod görevi basit/karmaşık olarak sınıflandırır, yerel/bulut sağlayıcı ve model adı kapasite sinyallerine göre adayları sıralar; bütçeye sığmayan son adayları çıkarabilir. Karar gerekçesi görevle birlikte saklanır. Her ajan ortak hedefi ve kendisinden önce tamamlanan görüşleri görür; sonraki turlarda karşı görüş üretir. İlk ajan son düğümde ekip koordinatörü olarak ortak sonucu sentezler. Her tamamlanan düğüm LangGraph SQLite checkpointer'a, kullanıcıya gösterilen mesaj da ana uygulama veritabanına kaydedilir.
 
-Model çağrısı bütçesi, seçilen ajan sayısı × tur + sentez formülüyle ağ erişiminden önce doğrulanır. Çağrı başına çıktı token bütçesi Ollama, Claude ve Gemini adaptörlerine doğrudan geçirilir. Başlatılan her sağlayıcı çağrısı kalıcı sayaçta tutulur. Para cinsinden tahmin bu aşamada yapılmaz; bunun için sağlayıcı kullanım verisi ve sürümlü fiyat kataloğu gerekir.
+Model çağrısı bütçesi, seçilen ajan sayısı × tur + sentez formülüyle ağ erişiminden önce doğrulanır. Çağrı başına çıktı token bütçesi Ollama, Claude ve Gemini adaptörlerine doğrudan geçirilir. Başlatılan her sağlayıcı çağrısı kalıcı sayaçta tutulur.
+
+USD görev bütçesi, `2026-09-09` sürümlü fiyat kataloğunu kullanır. Başlangıçta hedef, rol/talimat, seçilen dosyaların yalnız boyut bilgisi, planlanan konuşma büyümesi ve azami çıktı tokenları üzerinden ihtiyatlı bir üst sınır hesaplanır; sınırı aşan görev ağ çağrısından önce reddedilir. Bilinmeyen bulut modeli fiyatı kapalı davranışla reddedilir. Ollama ve LM Studio için API maliyeti sıfır kabul edilir. Her tamamlanan çağrıdan sonra sağlayıcının bildirdiği giriş/çıkış tokenları SQLite'a eklenir ve standart liste fiyatıyla hesaplanan kullanım maliyeti arayüze yayınlanır. Bütçe beklenmedik biçimde aşılırsa yapılmış çağrının maliyeti doğmuş olabilir; kalan çağrılar durdurulur.
+
+Katalog doğrudan API standart fiyatlarını temel alır: [Anthropic Claude API fiyatları](https://platform.claude.com/docs/en/about-claude/pricing) ve [Google Gemini API fiyatları](https://ai.google.dev/gemini-api/docs/pricing). Ücretsiz katman, batch indirimi, prompt cache, araç ücretleri, vergiler, kur dönüşümü ve hesaba özel indirimler hesaplanmaz. Gösterilen kullanım tutarı sağlayıcının faturası değil, gerçek token sayısına uygulanmış katalog liste maliyetidir. Gemini 2.5 Pro'nun 200 bin token üzeri uzun bağlam tarifesi desteklenir.
 
 Ajanlar varsayılan olarak dosya okuyamaz. Kullanıcı **Ajanlar** ekranından `workspace.read` iznini ajan bazında açar ve görev formunda okunacak göreli yolları açıkça seçer. LangGraph, somut dosya listesini `interrupt()` yüküyle arayüze gönderir ve görevi kalıcı `waiting_approval` durumuna alır. Onay aynı `thread_id` üzerinden devam eder; ret sıfır model çağrısıyla görevi kapatır. Dosya içerikleri onay öncesinde okunmaz ve ana görev kaydında tutulmaz. Mutlak yollar, `..`/symlink ile çalışma alanı dışına çıkış, gizli ve yaygın build klasörleri, UTF-8 olmayan/ikili içerik, izin verilmeyen uzantılar ve 128 KiB üzerindeki dosyalar reddedilir. En fazla 10 dosya ve toplam 128.000 karakter bağlama alınır. Bulut ajan seçilmişse onaylanan içerik ilgili sağlayıcıya gönderilir. Modelin kendi başına yol seçmesi, dosya yazması veya terminal çalıştırması bu dilimde mümkün değildir.
 
@@ -75,7 +79,7 @@ npm run schema:check
 
 Çoklu ajan görevleri manuel veya deterministik otomatik routing kullanır. Router kararı ve gerekçesi görev kaydında tutulur. Çağrı bütçesi, görev başlamadan önce gerekli model çağrılarını sınırlar; çıktı bütçesi her sağlayıcı isteğine doğrudan uygulanır. Çalışma alanı dosyaları seçildiyse LangGraph görevi `waiting_approval` checkpoint'inde durur. İçerik ancak kullanıcı somut dosya listesini onayladıktan sonra okunur; ret halinde hiçbir model çağrısı yapılmaz.
 
-Protokol v1 yapılandırma komutlarına ek olarak sohbet, kasa, workspace okuma ve `orchestration.start/approve/cancel/history` komutlarını sunar. Her komut `request_id` ve `protocol_version` içerir. Akış parçaları `run_id`, monoton `sequence`, olay türü, ajan/aşama kimliği ve terminal işareti taşır. Yanıtlar ile akış olayları Pydantic'ten üretilen ayrı çalışma zamanı doğrulayıcılarından geçer.
+Protokol v1 yapılandırma komutlarına ek olarak sohbet, kasa, workspace okuma, `pricing.catalog` ve `orchestration.start/approve/cancel/history` komutlarını sunar. Her komut `request_id` ve `protocol_version` içerir. Akış parçaları `run_id`, monoton `sequence`, olay türü, ajan/aşama kimliği ve terminal işareti taşır. Yanıtlar ile akış olayları Pydantic'ten üretilen ayrı çalışma zamanı doğrulayıcılarından geçer.
 
 ## Veri ve süreç yaşam döngüsü
 
@@ -98,7 +102,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 ```
 
-Backend testleri hesap/ajan ayrımı, foreign key/unique, yeniden açılışta kalıcılık, protokol reddi, klasör sınırları, ajan izinleri, ilerideki DB sürümünü koruma, gerçek stdin/stdout iletişimi, model keşfi, NDJSON ayrıştırma, sıralı akış, iptal, çoklu ajan durum geçişleri ve kısmi hata kaydını kapsar. Contract testleri üretilmiş yanıt ve ajan/aşama olay doğrulayıcılarının bozuk veriyi reddettiğini denetler. Paketlenmiş Python 3.12 sidecar ayrıca iki geçici Ollama ajanıyla gerçek üç aşamalı görev üzerinden doğrulanmıştır.
+Backend testleri hesap/ajan ayrımı, foreign key/unique, yeniden açılışta kalıcılık, protokol reddi, klasör sınırları, ajan izinleri, ilerideki DB sürümünü koruma, gerçek stdin/stdout iletişimi, model keşfi, NDJSON ayrıştırma, sıralı akış, iptal, çoklu ajan durum geçişleri, fiyat kataloğu, ön kontrol bütçesi, gerçek token bazlı maliyet toplama ve kısmi hata kaydını kapsar. Contract testleri üretilmiş yanıt ve ajan/aşama olay doğrulayıcılarının bozuk veriyi reddettiğini denetler. Paketlenmiş Python 3.12 sidecar ayrıca iki geçici Ollama ajanıyla gerçek üç aşamalı görev üzerinden doğrulanmıştır.
 
 ## Masaüstü paketi
 
@@ -110,7 +114,7 @@ macOS uygulaması `src-tauri/target/release/bundle/macos/ZeroCost.app` altında 
 
 ## Sonraki geliştirme dilimi
 
-1. Sağlayıcı kullanım bilgisini ve sürümlü fiyat kataloğunu kullanan para bütçesi.
-2. Model tarafından önerilen araç çağrıları için genişletilebilir onay kuyruğu; workspace yazma aracı.
-3. Terminal için komut ayrıştırma, risk sınıfları, çalışma dizini sınırı ve açık onay.
-4. Kesilmiş üretim düğümünü kontrollü yeniden deneme ve kısmi görev devamı.
+1. Model tarafından önerilen araç çağrıları için genişletilebilir onay kuyruğu; workspace yazma aracı.
+2. Terminal için komut ayrıştırma, risk sınıfları, çalışma dizini sınırı ve açık onay.
+3. Kesilmiş üretim düğümünü kontrollü yeniden deneme ve kısmi görev devamı.
+4. Sağlayıcı cache/batch tarifeleri ve kullanıcıya özel fiyat profilleri.

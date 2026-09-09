@@ -28,6 +28,9 @@ test("orchestration and workspace responses are closed", () => {
         run_id: "run", objective: "decide", agent_ids: ["a", "b"], rounds: 1,
         routing_mode: "manual", route_reason: "Manuel sıra korundu.",
         max_model_calls: 5, max_output_tokens: 512, used_model_calls: 3,
+        max_cost_microusd: 5000000, estimated_max_cost_microusd: 0,
+        actual_cost_microusd: 0, input_tokens: 0, output_tokens: 0,
+        price_catalog_version: "2026-09-09",
         workspace_id: null, context_paths: [],
         status: "completed", error: "", messages: [
           { sequence: 1, agent_id: "a", phase: "analysis", content: "view" },
@@ -40,6 +43,23 @@ test("orchestration and workspace responses are closed", () => {
   const file = { protocol_version: 1, request_id: "read", ok: true,
     result: { workspace_id: "w", path: "README.md", content: "text", size: 4 } };
   assert.equal(validate(file), true);
+});
+
+test("pricing catalog response is typed and closed", () => {
+  const response = {
+    protocol_version: 1,
+    request_id: "prices",
+    ok: true,
+    result: {
+      version: "2026-09-09",
+      currency: "USD",
+      sources: { gemini: "https://ai.google.dev/gemini-api/docs/pricing" },
+      entries: [{ provider: "gemini", model_pattern: "gemini-2-5-flash",
+        input_per_million_usd: 0.3, output_per_million_usd: 2.5 }],
+    },
+  };
+  assert.equal(validate(response), true);
+  assert.equal(validate({ ...response, result: { ...response.result, secret: "x" } }), false);
 });
 
 test("orchestration stream attributes every chunk", () => {

@@ -27,7 +27,8 @@ def test_ndjson_stream_yields_only_content_and_requires_done():
     lines = [
         {"message": {"role": "assistant", "content": "mer"}, "done": False},
         {"message": {"role": "assistant", "content": "haba"}, "done": False},
-        {"message": {"role": "assistant", "content": ""}, "done": True},
+        {"message": {"role": "assistant", "content": ""}, "done": True,
+         "prompt_eval_count": 3, "eval_count": 2},
     ]
 
     async def handler(request):
@@ -40,6 +41,7 @@ def test_ndjson_stream_yields_only_content_and_requires_done():
         provider = OllamaProvider("model", httpx.MockTransport(handler))
         chunks = [chunk async for chunk in provider.stream_reply([Message(role="user", content="hi")])]
         assert chunks == ["mer", "haba"]
+        assert (provider.usage.input_tokens, provider.usage.output_tokens) == (3, 2)
 
     asyncio.run(scenario())
 

@@ -282,6 +282,7 @@ class OrchestrationStartInput(Model):
     routing_mode: RoutingMode = "manual"
     max_model_calls: int = Field(default=5, ge=3, le=13)
     max_output_tokens: int = Field(default=512, ge=128, le=4096)
+    max_cost_microusd: int = Field(default=5_000_000, ge=0, le=1_000_000_000)
     workspace_id: Identifier | None = None
     context_paths: list[Annotated[str, StringConstraints(min_length=1, max_length=4096)]] = Field(
         default_factory=list, max_length=10
@@ -334,6 +335,24 @@ class OrchestrationHistoryRequest(RequestBase):
     method: Literal["orchestration.history"]
 
 
+class PricingCatalogRequest(RequestBase):
+    method: Literal["pricing.catalog"]
+
+
+class PriceEntry(Model):
+    provider: Literal["anthropic", "gemini"]
+    model_pattern: str
+    input_per_million_usd: float
+    output_per_million_usd: float
+
+
+class PricingCatalog(Model):
+    version: str
+    currency: Literal["USD"] = "USD"
+    sources: dict[str, str]
+    entries: list[PriceEntry]
+
+
 class OrchestrationMessage(Model):
     sequence: int
     agent_id: str
@@ -351,6 +370,12 @@ class OrchestrationRun(Model):
     max_model_calls: int
     max_output_tokens: int
     used_model_calls: int
+    max_cost_microusd: int
+    estimated_max_cost_microusd: int
+    actual_cost_microusd: int
+    input_tokens: int
+    output_tokens: int
+    price_catalog_version: str
     workspace_id: str | None
     context_paths: list[str]
     status: OrchestrationStatus
@@ -412,6 +437,9 @@ class OrchestrationRoute(Model):
     planned_model_calls: int
     max_model_calls: int
     max_output_tokens: int
+    estimated_max_cost_microusd: int
+    max_cost_microusd: int
+    price_catalog_version: str
     is_final: Literal[False] = False
 
 
@@ -426,11 +454,23 @@ class OrchestrationApprovalRequired(Model):
     is_final: Literal[False] = False
 
 
+class OrchestrationUsage(Model):
+    protocol_version: Literal[1] = 1
+    type: Literal["orchestration_usage"] = "orchestration_usage"
+    run_id: str
+    sequence: int
+    input_tokens: int
+    output_tokens: int
+    actual_cost_microusd: int
+    is_final: Literal[False] = False
+
+
 Request = Annotated[Union[SnapshotRequest, ConnectionRequest, AgentRequest, WorkspaceRequest,
                          AgentPermissionsRequest, WorkspaceListRequest, WorkspaceReadRequest,
                          ModelsRequest, ChatStartRequest, CancelRequest, HistoryRequest, VaultRequest,
                          OrchestrationStartRequest, OrchestrationCancelRequest,
-                         OrchestrationApprovalRequest, OrchestrationHistoryRequest], Field(discriminator="method")]
+                         OrchestrationApprovalRequest, OrchestrationHistoryRequest,
+                         PricingCatalogRequest], Field(discriminator="method")]
 
 
 class Success(Model):
@@ -438,7 +478,8 @@ class Success(Model):
     request_id: str
     ok: Literal[True] = True
     result: Union[Snapshot, OllamaModels, ChatHistory, Accepted, VaultStatus,
-                  WorkspaceListing, WorkspaceFile, OrchestrationHistory]
+                  WorkspaceListing, WorkspaceFile, OrchestrationHistory,
+                  PricingCatalog]
 
 
 Response = Union[Success, Failure]
@@ -449,4 +490,4 @@ class Contract(Model):
     response: Response
     event: Union[StreamEvent, OrchestrationChunk, OrchestrationMessageEnd,
                  OrchestrationEnd, OrchestrationError, OrchestrationRoute,
-                 OrchestrationApprovalRequired]
+                 OrchestrationApprovalRequired, OrchestrationUsage]

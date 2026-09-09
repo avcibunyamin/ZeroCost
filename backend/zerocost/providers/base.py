@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import AsyncIterator
 from pydantic import BaseModel
 from typing import Literal
+from ..pricing import TokenUsage
 
 
 class Message(BaseModel):
@@ -14,6 +15,7 @@ class ProviderError(Exception):
 
 
 class ProviderAdapter(ABC):
+    usage = TokenUsage()
     @abstractmethod
     def stream_reply(self, messages: list[Message], *, api_key=None,
                      max_tokens: int = 512) -> AsyncIterator[str]:

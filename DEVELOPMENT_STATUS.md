@@ -7,7 +7,7 @@
 - SQLite bağlantı, ajan ve çalışma alanı kayıtları; veri bütünlüğü ve kalıcılık.
 - Pydantic → JSON Schema → TypeScript + paketlenmiş Ajv runtime doğrulayıcısı.
 - PyInstaller sidecar ve macOS .app paketleme betikleri.
-- Kurulum/komutlar README.md içinde; CI yapılandırması eklendi (uzak CI henüz çalıştırılmadı).
+- Kurulum/komutlar README.md içinde; GitHub Actions doğrulaması `main` dalında çalışıyor.
 
 ## Doğrulama
 
@@ -49,16 +49,25 @@
 - Homebrew Python 3.12.14 kuruldu; proje `.venv` ortamı 3.12 ile yeniden oluşturuldu. Doğrulama sonrası geçici 3.9 ve staging ortamları macOS Çöp Sepeti'ne taşındı.
 - LangGraph 1.2.11 ve SQLite checkpointer 3.1.1 eklendi.
 - Ajan masası 2–4 ajan, 1–3 tartışma turu, ajan görüşleri ve ilk ajan sentezi yürütüyor.
-- Ajan ve aşama bilgili token olayları React'a akıyor; tamamlanan mesajlar ve görev durumu şema v4 SQLite'a yazılıyor.
+- Ajan ve aşama bilgili token olayları React'a akıyor; tamamlanan mesajlar ve görev durumu sürümlü SQLite şemasına yazılıyor.
 - Çoklu bulut ajanlarında Rust her bağlantının anahtarını ayrı çözüyor; Python eşleşmeleri yeniden doğruluyor.
 - `workspace.read` izni ajan bazında açılıp kapatılıyor. Klasör listeleme ve dosya okuma uçları containment, symlink, tür, boyut ve UTF-8 sınırları uyguluyor.
 - Görev formu kullanıcının seçtiği en fazla 10 göreli dosyayı bağlama alıyor; seçili tüm ajanların okuma izni gerekiyor.
 - 34 Python, 7 JS sözleşme ve 2 Rust testi geçti; native kasa testi sentetik anahtarı temizledi.
 - Paketlenmiş sidecar iki geçici Ollama ajanıyla gerçek üç aşamalı LangGraph görevini tamamladı; geçici veritabanı otomatik silindi.
 
+## Fiat bütçe ve fiyat kataloğu
+
+- SQLite şeması v6; görev bütçesi, üst maliyet tahmini, token toplamları, token bazlı liste maliyeti ve katalog sürümü kalıcıdır.
+- `pricing.catalog` ile aynı fiyat verisi Pydantic → TypeScript sözleşmesinden arayüze taşınır.
+- Claude, Gemini ve Ollama adaptörleri sağlayıcı kullanım sayaçlarını ortak `TokenUsage` yapısına dönüştürür.
+- Görev planı bütçeyi aşarsa ağ erişiminden önce reddedilir; bilinmeyen bulut modelinde fiyat tahmini kapalı davranır.
+- Her çağrı sonrasında kümülatif token ve standart USD liste maliyeti canlı olayla arayüze gönderilir.
+- 42 Python ve 8 JavaScript sözleşme testi geçti.
+
 ## Sınırlar
 
-Salt okunur workspace aracı yalnız kullanıcı seçtiği ve çalıştırma anında onayladığı dosyaları bağlama alır; model tarafından başlatılan tool calling, dosya yazma ve terminal henüz yok. Router kural ve kapasite sinyalleri kullanır; para maliyeti için sağlayıcı kullanım ölçümü ve fiyat kataloğu henüz yoktur. Eşzamanlı üretim limiti birdir. İmzalı/notarize dağıtım ve Windows/Linux doğrulaması yapılmadı. Google SDK, Pydantic 2.13 kullanımı için upstream deprecation uyarısı üretir.
+Salt okunur workspace aracı yalnız kullanıcı seçtiği ve çalıştırma anında onayladığı dosyaları bağlama alır; model tarafından başlatılan tool calling, dosya yazma ve terminal henüz yok. Router kural ve kapasite sinyalleri kullanır. Maliyet, sağlayıcı faturası yerine sürümlü standart liste fiyatının gerçek token kullanımına uygulanmasıdır; ücretsiz katman, cache, batch, araç ücretleri ve hesaba özel fiyatlar henüz yoktur. Eşzamanlı üretim limiti birdir. İmzalı/notarize dağıtım ve Windows/Linux doğrulaması yapılmadı. Google SDK, Pydantic 2.13 kullanımı için upstream deprecation uyarısı üretir.
 
 ## Yollar
 
@@ -66,7 +75,7 @@ Salt okunur workspace aracı yalnız kullanıcı seçtiği ve çalıştırma an�
 - Paket: src-tauri/target/release/bundle/macos/ZeroCost.app
 - Geliştirme: npm run desktop
 - macOS paket: npm run desktop:build -- --bundles app
-# Faz 2 · Router, bütçe ve onay kuyruğu
+## Faz 2 · Router, bütçe ve onay kuyruğu
 
 - Manuel ve otomatik, denetlenebilir ajan sıralaması
 - Görev öncesi model çağrısı bütçesi ve sağlayıcı başına çıktı token sınırı
@@ -76,7 +85,15 @@ Salt okunur workspace aracı yalnız kullanıcı seçtiği ve çalıştırma an�
 
 ## Güncel doğrulama
 
-- 37 Python ve 7 JavaScript sözleşme testi geçti.
+- 42 Python ve 8 JavaScript sözleşme testi geçti.
 - 2 Rust testi, native macOS kasa testi dahil, geçti.
-- Paketlenmiş sidecar gerçek Ollama ile rota → onay → checkpoint devamı → üç model çağrısı akışını tamamladı.
-- Kullanıcı veritabanı v4'ten v5'e veri bütünlüğü korunarak geçti; kurulu `/Applications/ZeroCost.app` şema v5 ile bağlı çalışıyor.
+- Paketlenmiş sidecar gerçek Ollama ile rota ve üç model çağrısı akışını tamamladı; kullanım olayları doğrulandı.
+- Kullanıcı veritabanı v5'ten v6'ya veri bütünlüğü korunarak geçti; kurulu `/Applications/ZeroCost.app` şema v6 ile bağlı çalışıyor.
+
+## Faz 2 · Fiat bütçe
+
+- 9 Eylül 2026 tarihli Anthropic ve Gemini standart API fiyat kataloğu
+- Ağ erişiminden önce ihtiyatlı USD üst sınır denetimi
+- Sağlayıcının bildirdiği tokenların çağrı ve görev bazında kalıcı toplanması
+- Arayüzde katalog, üst tahmin ve token bazlı liste maliyeti
+- SQLite v5 → v6 kayıpsız geçiş

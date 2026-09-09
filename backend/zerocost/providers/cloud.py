@@ -5,6 +5,7 @@ from anthropic import AsyncAnthropic
 from google import genai
 from google.genai import types
 from .base import ProviderAdapter, ProviderError
+from ..pricing import TokenUsage
 
 # SDK debug logging may include HTTP headers; it must never be enabled in the sidecar.
 for name in ('anthropic', 'google.genai', 'google_genai', 'httpx', 'httpcore'):
@@ -27,8 +28,10 @@ class AnthropicProvider(ProviderAdapter):
         self.model = model
         self.client_factory = client_factory
         self.transport = transport
+        self.usage = TokenUsage()
 
     async def stream_reply(self, messages, *, api_key=None, max_tokens=512):
+        self.usage = TokenUsage()
         key = require_key(api_key)
         system, conversation = split_messages(messages)
         try:
@@ -44,6 +47,8 @@ class AnthropicProvider(ProviderAdapter):
                             if event.type == 'message_stop':
                                 ended = True
                         final = await stream.get_final_message()
+                        self.usage = TokenUsage(final.usage.input_tokens,
+                                                final.usage.output_tokens)
                         if not ended or final.stop_reason != 'end_turn':
                             raise ProviderError('Claude yanıtı sınır veya sağlayıcı kararı nedeniyle tamamlanamadı.')
         except ProviderError:
@@ -56,8 +61,10 @@ class GeminiProvider(ProviderAdapter):
     def __init__(self, model, client_factory=genai.Client):
         self.model = model
         self.client_factory = client_factory
+        self.usage = TokenUsage()
 
     async def stream_reply(self, messages, *, api_key=None, max_tokens=512):
+        self.usage = TokenUsage()
         key = require_key(api_key)
         system, conversation = split_messages(messages)
         config = types.GenerateContentConfig(system_instruction=system, max_output_tokens=max_tokens,
@@ -75,6 +82,12 @@ class GeminiProvider(ProviderAdapter):
             finished = False
             async with client.aio as aio:
                 async for chunk in await aio.models.generate_content_stream(model=self.model, contents=contents, config=config):
+                    if chunk.usage_metadata:
+                        meta = chunk.usage_metadata
+                        prompt = int(meta.prompt_token_count or 0)
+                        visible = int(meta.candidates_token_count or 0)
+                        thoughts = int(meta.thoughts_token_count or 0)
+                        self.usage = TokenUsage(prompt, visible + thoughts)
                     for candidate in chunk.candidates or []:
                         if candidate.content:
                             for part in candidate.content.parts or []:

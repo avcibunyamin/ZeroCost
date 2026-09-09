@@ -819,6 +819,19 @@ main {
   gap: 12px;
 }
 
+.price-catalog {
+  padding: 11px 12px;
+  border: 1px solid #e5ebe5;
+  border-radius: 10px;
+  color: #526054;
+  font-size: 11px;
+}
+.price-catalog summary { cursor: pointer; font-weight: 650; }
+.price-catalog p { margin: 9px 0; color: #879488; }
+.price-catalog div { display: grid; gap: 6px; }
+.price-catalog span { display: flex; justify-content: space-between; gap: 12px; }
+.price-catalog strong { color: #354138; }
+
 .approval-card {
   border: 1px solid rgba(44, 121, 91, 0.28);
   border-radius: 16px;

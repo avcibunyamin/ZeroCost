@@ -3,6 +3,7 @@ from typing import AsyncIterator
 import httpx
 from .base import Message, ProviderAdapter, ProviderError
 from ..models import OllamaModel, OllamaModels
+from ..pricing import TokenUsage
 
 OLLAMA_URL = "http://127.0.0.1:11434"
 
@@ -11,6 +12,7 @@ class OllamaProvider(ProviderAdapter):
     def __init__(self, model: str, transport=None):
         self.model = model
         self.transport = transport
+        self.usage = TokenUsage()
 
     def client(self):
         return httpx.AsyncClient(base_url=OLLAMA_URL, transport=self.transport,
@@ -40,6 +42,7 @@ class OllamaProvider(ProviderAdapter):
 
     async def stream_reply(self, messages: list[Message], *, api_key=None,
                            max_tokens: int = 512) -> AsyncIterator[str]:
+        self.usage = TokenUsage()
         try:
             async with self.client() as client:
                 async with client.stream('POST', '/api/chat', json={
@@ -72,6 +75,8 @@ class OllamaProvider(ProviderAdapter):
                             if token:
                                 yield token
                             if data.get('done') is True:
+                                self.usage = TokenUsage(int(data.get('prompt_eval_count', 0)),
+                                                        int(data.get('eval_count', 0)))
                                 return
                     # Ollama NDJSON normally ends with a newline; accept a final un-delimited frame too.
                     if buffer.strip():
@@ -82,6 +87,8 @@ class OllamaProvider(ProviderAdapter):
                                 raise ProviderError('Ollama metin biçimi geçersiz.')
                             if token:
                                 yield token
+                            self.usage = TokenUsage(int(data.get('prompt_eval_count', 0)),
+                                                    int(data.get('eval_count', 0)))
                             return
                     raise ProviderError('Ollama akışı tamamlanma işareti olmadan kapandı.')
         except httpx.TimeoutException as exc:

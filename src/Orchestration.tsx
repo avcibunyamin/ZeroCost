@@ -7,6 +7,7 @@ import type {
   OrchestrationMessage,
   OrchestrationRun,
   OrchestrationStartInput,
+  PricingCatalog,
   Snapshot,
 } from "./generated/contract";
 
@@ -25,9 +26,11 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
   const [routingMode, setRoutingMode] = useState<"manual" | "auto">("auto");
   const [maxModelCalls, setMaxModelCalls] = useState(5);
   const [maxOutputTokens, setMaxOutputTokens] = useState(512);
+  const [maxCostUsd, setMaxCostUsd] = useState(5);
   const [workspaceId, setWorkspaceId] = useState("");
   const [contextInput, setContextInput] = useState("");
   const [runs, setRuns] = useState<OrchestrationRun[]>([]);
+  const [catalog, setCatalog] = useState<PricingCatalog | null>(null);
   const [streaming, setStreaming] = useState<StreamingMessage | null>(null);
   const [active, setActive] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -55,7 +58,14 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
   }
 
   useEffect(() => {
-    if (desktopAvailable) void refresh().catch((e) => setError(String(e)));
+    if (desktopAvailable) {
+      void refresh().catch((e) => setError(String(e)));
+      void rpc({ method: "pricing.catalog" })
+        .then((result) => {
+          if ("currency" in result) setCatalog(result);
+        })
+        .catch((e) => setError(String(e)));
+    }
   }, []);
   useEffect(() => {
     if (selected.length < 2 && (snapshot?.agents.length ?? 0) >= 2)
@@ -124,6 +134,22 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
                   ...run,
                   agent_ids: payload.agent_ids,
                   route_reason: payload.reason,
+                  estimated_max_cost_microusd:
+                    payload.estimated_max_cost_microusd,
+                }
+              : run,
+          ),
+        );
+      } else if (payload.type === "orchestration_usage") {
+        setRuns((items) =>
+          items.map((run) =>
+            run.run_id === payload.run_id
+              ? {
+                  ...run,
+                  input_tokens: payload.input_tokens,
+                  output_tokens: payload.output_tokens,
+                  actual_cost_microusd: payload.actual_cost_microusd,
+                  used_model_calls: run.used_model_calls + 1,
                 }
               : run,
           ),
@@ -188,6 +214,12 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       route_reason: "Yönlendirme bekleniyor.",
       max_model_calls: maxModelCalls,
       max_output_tokens: maxOutputTokens,
+      max_cost_microusd: Math.round(maxCostUsd * 1_000_000),
+      estimated_max_cost_microusd: 0,
+      actual_cost_microusd: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      price_catalog_version: catalog?.version ?? "yükleniyor",
       used_model_calls: 0,
       workspace_id: workspaceId || null,
       context_paths: contextPaths,
@@ -211,6 +243,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
           routing_mode: routingMode,
           max_model_calls: maxModelCalls,
           max_output_tokens: maxOutputTokens,
+          max_cost_microusd: Math.round(maxCostUsd * 1_000_000),
           workspace_id: workspaceId || null,
           context_paths:
             contextPaths as OrchestrationStartInput["context_paths"],
@@ -356,6 +389,18 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               />
             </label>
             <label>
+              Azami maliyet · USD
+              <input
+                type="number"
+                min={0}
+                max={1000}
+                step={0.01}
+                value={maxCostUsd}
+                onChange={(e) => setMaxCostUsd(Number(e.target.value))}
+                disabled={active}
+              />
+            </label>
+            <label>
               Yanıt tokenı / çağrı
               <select
                 value={maxOutputTokens}
@@ -368,6 +413,20 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               </select>
             </label>
           </div>
+          {catalog && (
+            <details className="price-catalog">
+              <summary>Fiyat kataloğu · {catalog.version}</summary>
+              <p>Standart API liste fiyatları · USD / 1 milyon token</p>
+              <div>
+                {catalog.entries.map((entry) => (
+                  <span key={`${entry.provider}-${entry.model_pattern}`}>
+                    <strong>{entry.model_pattern}</strong>
+                    {` $${entry.input_per_million_usd} giriş · $${entry.output_per_million_usd} çıkış`}
+                  </span>
+                ))}
+              </div>
+            </details>
+          )}
           <label>
             Tartışma turu
             <select
@@ -455,6 +514,9 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
                 (routingMode === "manual" &&
                   maxModelCalls < selected.length * rounds + 1) ||
                 maxModelCalls < rounds * 2 + 1 ||
+                !Number.isFinite(maxCostUsd) ||
+                maxCostUsd < 0 ||
+                maxCostUsd > 1000 ||
                 missingReadPermission ||
                 (contextRequested && !workspaceId)
               }
@@ -474,7 +536,12 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
                   : "Henüz ortak görev yok."}
               </p>
               {current?.route_reason && (
-                <small>{current.route_reason} · {current.used_model_calls}/{current.max_model_calls} çağrı</small>
+                <small>
+                  {current.route_reason} · {current.used_model_calls}/{current.max_model_calls} çağrı
+                  {` · $${(current.actual_cost_microusd / 1_000_000).toFixed(6)} kullanılan`}
+                  {` · $${(current.estimated_max_cost_microusd / 1_000_000).toFixed(4)} üst tahmin`}
+                  {` · katalog ${current.price_catalog_version}`}
+                </small>
               )}
             </div>
             {active && <LoaderCircle className="spin" size={19} />}

@@ -16,7 +16,8 @@ export type Request =
   | OrchestrationStartRequest
   | OrchestrationCancelRequest
   | OrchestrationApprovalRequest
-  | OrchestrationHistoryRequest;
+  | OrchestrationHistoryRequest
+  | PricingCatalogRequest;
 export type ProtocolVersion = 1;
 export type RequestId = string;
 export type Method = "snapshot";
@@ -118,6 +119,7 @@ export type Rounds = number;
 export type RoutingMode = "manual" | "auto";
 export type MaxModelCalls = number;
 export type MaxOutputTokens = number;
+export type MaxCostMicrousd = number;
 export type WorkspaceId1 = string | null;
 /**
  * @maxItems 10
@@ -145,9 +147,12 @@ export type Decision = "approve" | "reject";
 export type ProtocolVersion15 = 1;
 export type RequestId15 = string;
 export type Method15 = "orchestration.history";
-export type Response = Success | Failure;
 export type ProtocolVersion16 = 1;
 export type RequestId16 = string;
+export type Method16 = "pricing.catalog";
+export type Response = Success | Failure;
+export type ProtocolVersion17 = 1;
+export type RequestId17 = string;
 export type Ok = true;
 export type Result =
   | Snapshot
@@ -157,9 +162,10 @@ export type Result =
   | VaultStatus
   | WorkspaceListing
   | WorkspaceFile
-  | OrchestrationHistory;
+  | OrchestrationHistory
+  | PricingCatalog;
 export type AppVersion = "0.1.0";
-export type ProtocolVersion17 = 1;
+export type ProtocolVersion18 = 1;
 export type DatabaseVersion = number;
 export type Name3 = string;
 export type Provider1 = "ollama" | "lmstudio" | "anthropic" | "gemini" | "openai";
@@ -212,6 +218,12 @@ export type RouteReason = string;
 export type MaxModelCalls1 = number;
 export type MaxOutputTokens1 = number;
 export type UsedModelCalls = number;
+export type MaxCostMicrousd1 = number;
+export type EstimatedMaxCostMicrousd = number;
+export type ActualCostMicrousd = number;
+export type InputTokens = number;
+export type OutputTokens = number;
+export type PriceCatalogVersion = string;
 export type WorkspaceId4 = string | null;
 export type ContextPaths1 = string[];
 export type Status2 = "running" | "waiting_approval" | "completed" | "cancelled" | "failed" | "interrupted";
@@ -222,8 +234,15 @@ export type Phase = "analysis" | "review" | "synthesis";
 export type Content2 = string;
 export type Messages = OrchestrationMessage[];
 export type Runs = OrchestrationRun[];
-export type ProtocolVersion18 = 1;
-export type RequestId17 = string;
+export type Version = string;
+export type Currency = "USD";
+export type Provider2 = "anthropic" | "gemini";
+export type ModelPattern = string;
+export type InputPerMillionUsd = number;
+export type OutputPerMillionUsd = number;
+export type Entries1 = PriceEntry[];
+export type ProtocolVersion19 = 1;
+export type RequestId18 = string;
 export type Ok1 = false;
 export type Code = "invalid_request" | "conflict" | "not_found" | "internal_error";
 export type Message1 = string;
@@ -237,31 +256,32 @@ export type Event =
   | OrchestrationEnd
   | OrchestrationError
   | OrchestrationRoute
-  | OrchestrationApprovalRequired;
-export type ProtocolVersion19 = 1;
+  | OrchestrationApprovalRequired
+  | OrchestrationUsage;
+export type ProtocolVersion20 = 1;
 export type Type = "stream_chunk";
 export type RunId7 = string;
 export type Sequence1 = number;
 export type Token = string;
 export type IsFinal = false;
-export type ProtocolVersion20 = 1;
+export type ProtocolVersion21 = 1;
 export type Type1 = "stream_end";
 export type RunId8 = string;
 export type Sequence2 = number;
 export type FullContent = string;
 export type Status3 = "completed" | "cancelled";
 export type IsFinal1 = true;
-export type ProtocolVersion21 = 1;
+export type ProtocolVersion22 = 1;
 export type Type2 = "stream_error";
 export type RunId9 = string;
 export type Sequence3 = number;
 export type FullContent1 = string;
 export type Message2 = string;
 export type IsFinal2 = true;
-export type ProtocolVersion22 = 1;
+export type ProtocolVersion23 = 1;
 export type Type3 = "transport_error";
 export type Message3 = string;
-export type ProtocolVersion23 = 1;
+export type ProtocolVersion24 = 1;
 export type Type4 = "orchestration_chunk";
 export type RunId10 = string;
 export type Sequence4 = number;
@@ -269,7 +289,7 @@ export type AgentId6 = string;
 export type Phase1 = "analysis" | "review" | "synthesis";
 export type Token1 = string;
 export type IsFinal3 = false;
-export type ProtocolVersion24 = 1;
+export type ProtocolVersion25 = 1;
 export type Type5 = "orchestration_message_end";
 export type RunId11 = string;
 export type Sequence5 = number;
@@ -277,19 +297,19 @@ export type AgentId7 = string;
 export type Phase2 = "analysis" | "review" | "synthesis";
 export type FullContent2 = string;
 export type IsFinal4 = false;
-export type ProtocolVersion25 = 1;
+export type ProtocolVersion26 = 1;
 export type Type6 = "orchestration_end";
 export type RunId12 = string;
 export type Sequence6 = number;
 export type Status4 = "completed" | "cancelled";
 export type IsFinal5 = true;
-export type ProtocolVersion26 = 1;
+export type ProtocolVersion27 = 1;
 export type Type7 = "orchestration_error";
 export type RunId13 = string;
 export type Sequence7 = number;
 export type Message4 = string;
 export type IsFinal6 = true;
-export type ProtocolVersion27 = 1;
+export type ProtocolVersion28 = 1;
 export type Type8 = "orchestration_route";
 export type RunId14 = string;
 export type Sequence8 = number;
@@ -298,8 +318,11 @@ export type Reason = string;
 export type PlannedModelCalls = number;
 export type MaxModelCalls2 = number;
 export type MaxOutputTokens2 = number;
+export type EstimatedMaxCostMicrousd1 = number;
+export type MaxCostMicrousd2 = number;
+export type PriceCatalogVersion1 = string;
 export type IsFinal7 = false;
-export type ProtocolVersion28 = 1;
+export type ProtocolVersion29 = 1;
 export type Type9 = "orchestration_approval_required";
 export type RunId15 = string;
 export type Sequence9 = number;
@@ -307,6 +330,14 @@ export type Permission = "workspace.read";
 export type WorkspaceId5 = string;
 export type Paths = string[];
 export type IsFinal8 = false;
+export type ProtocolVersion30 = 1;
+export type Type10 = "orchestration_usage";
+export type RunId16 = string;
+export type Sequence10 = number;
+export type InputTokens1 = number;
+export type OutputTokens1 = number;
+export type ActualCostMicrousd1 = number;
+export type IsFinal9 = false;
 
 export interface Contract {
   request: Request;
@@ -529,6 +560,7 @@ export interface OrchestrationStartInput {
   routing_mode: RoutingMode;
   max_model_calls: MaxModelCalls;
   max_output_tokens: MaxOutputTokens;
+  max_cost_microusd: MaxCostMicrousd;
   workspace_id: WorkspaceId1;
   context_paths: ContextPaths;
 }
@@ -571,11 +603,20 @@ export interface OrchestrationHistoryRequest {
 }
 /**
  * This interface was referenced by `Contract`'s JSON-Schema
+ * via the `definition` "PricingCatalogRequest".
+ */
+export interface PricingCatalogRequest {
+  protocol_version: ProtocolVersion16;
+  request_id: RequestId16;
+  method: Method16;
+}
+/**
+ * This interface was referenced by `Contract`'s JSON-Schema
  * via the `definition` "Success".
  */
 export interface Success {
-  protocol_version: ProtocolVersion16;
-  request_id: RequestId16;
+  protocol_version: ProtocolVersion17;
+  request_id: RequestId17;
   ok: Ok;
   result: Result;
 }
@@ -585,7 +626,7 @@ export interface Success {
  */
 export interface Snapshot {
   app_version: AppVersion;
-  protocol_version: ProtocolVersion17;
+  protocol_version: ProtocolVersion18;
   database_version: DatabaseVersion;
   connections: Connections;
   agents: Agents;
@@ -723,6 +764,12 @@ export interface OrchestrationRun {
   max_model_calls: MaxModelCalls1;
   max_output_tokens: MaxOutputTokens1;
   used_model_calls: UsedModelCalls;
+  max_cost_microusd: MaxCostMicrousd1;
+  estimated_max_cost_microusd: EstimatedMaxCostMicrousd;
+  actual_cost_microusd: ActualCostMicrousd;
+  input_tokens: InputTokens;
+  output_tokens: OutputTokens;
+  price_catalog_version: PriceCatalogVersion;
   workspace_id: WorkspaceId4;
   context_paths: ContextPaths1;
   status: Status2;
@@ -741,11 +788,34 @@ export interface OrchestrationMessage {
 }
 /**
  * This interface was referenced by `Contract`'s JSON-Schema
+ * via the `definition` "PricingCatalog".
+ */
+export interface PricingCatalog {
+  version: Version;
+  currency: Currency;
+  sources: Sources;
+  entries: Entries1;
+}
+export interface Sources {
+  [k: string]: string;
+}
+/**
+ * This interface was referenced by `Contract`'s JSON-Schema
+ * via the `definition` "PriceEntry".
+ */
+export interface PriceEntry {
+  provider: Provider2;
+  model_pattern: ModelPattern;
+  input_per_million_usd: InputPerMillionUsd;
+  output_per_million_usd: OutputPerMillionUsd;
+}
+/**
+ * This interface was referenced by `Contract`'s JSON-Schema
  * via the `definition` "Failure".
  */
 export interface Failure {
-  protocol_version: ProtocolVersion18;
-  request_id: RequestId17;
+  protocol_version: ProtocolVersion19;
+  request_id: RequestId18;
   ok: Ok1;
   code: Code;
   message: Message1;
@@ -755,7 +825,7 @@ export interface Failure {
  * via the `definition` "StreamChunk".
  */
 export interface StreamChunk {
-  protocol_version: ProtocolVersion19;
+  protocol_version: ProtocolVersion20;
   type: Type;
   run_id: RunId7;
   sequence: Sequence1;
@@ -767,7 +837,7 @@ export interface StreamChunk {
  * via the `definition` "StreamEnd".
  */
 export interface StreamEnd {
-  protocol_version: ProtocolVersion20;
+  protocol_version: ProtocolVersion21;
   type: Type1;
   run_id: RunId8;
   sequence: Sequence2;
@@ -780,7 +850,7 @@ export interface StreamEnd {
  * via the `definition` "StreamError".
  */
 export interface StreamError {
-  protocol_version: ProtocolVersion21;
+  protocol_version: ProtocolVersion22;
   type: Type2;
   run_id: RunId9;
   sequence: Sequence3;
@@ -793,7 +863,7 @@ export interface StreamError {
  * via the `definition` "TransportError".
  */
 export interface TransportError {
-  protocol_version: ProtocolVersion22;
+  protocol_version: ProtocolVersion23;
   type: Type3;
   message: Message3;
 }
@@ -802,7 +872,7 @@ export interface TransportError {
  * via the `definition` "OrchestrationChunk".
  */
 export interface OrchestrationChunk {
-  protocol_version: ProtocolVersion23;
+  protocol_version: ProtocolVersion24;
   type: Type4;
   run_id: RunId10;
   sequence: Sequence4;
@@ -816,7 +886,7 @@ export interface OrchestrationChunk {
  * via the `definition` "OrchestrationMessageEnd".
  */
 export interface OrchestrationMessageEnd {
-  protocol_version: ProtocolVersion24;
+  protocol_version: ProtocolVersion25;
   type: Type5;
   run_id: RunId11;
   sequence: Sequence5;
@@ -830,7 +900,7 @@ export interface OrchestrationMessageEnd {
  * via the `definition` "OrchestrationEnd".
  */
 export interface OrchestrationEnd {
-  protocol_version: ProtocolVersion25;
+  protocol_version: ProtocolVersion26;
   type: Type6;
   run_id: RunId12;
   sequence: Sequence6;
@@ -842,7 +912,7 @@ export interface OrchestrationEnd {
  * via the `definition` "OrchestrationError".
  */
 export interface OrchestrationError {
-  protocol_version: ProtocolVersion26;
+  protocol_version: ProtocolVersion27;
   type: Type7;
   run_id: RunId13;
   sequence: Sequence7;
@@ -854,7 +924,7 @@ export interface OrchestrationError {
  * via the `definition` "OrchestrationRoute".
  */
 export interface OrchestrationRoute {
-  protocol_version: ProtocolVersion27;
+  protocol_version: ProtocolVersion28;
   type: Type8;
   run_id: RunId14;
   sequence: Sequence8;
@@ -863,6 +933,9 @@ export interface OrchestrationRoute {
   planned_model_calls: PlannedModelCalls;
   max_model_calls: MaxModelCalls2;
   max_output_tokens: MaxOutputTokens2;
+  estimated_max_cost_microusd: EstimatedMaxCostMicrousd1;
+  max_cost_microusd: MaxCostMicrousd2;
+  price_catalog_version: PriceCatalogVersion1;
   is_final: IsFinal7;
 }
 /**
@@ -870,7 +943,7 @@ export interface OrchestrationRoute {
  * via the `definition` "OrchestrationApprovalRequired".
  */
 export interface OrchestrationApprovalRequired {
-  protocol_version: ProtocolVersion28;
+  protocol_version: ProtocolVersion29;
   type: Type9;
   run_id: RunId15;
   sequence: Sequence9;
@@ -878,4 +951,18 @@ export interface OrchestrationApprovalRequired {
   workspace_id: WorkspaceId5;
   paths: Paths;
   is_final: IsFinal8;
+}
+/**
+ * This interface was referenced by `Contract`'s JSON-Schema
+ * via the `definition` "OrchestrationUsage".
+ */
+export interface OrchestrationUsage {
+  protocol_version: ProtocolVersion30;
+  type: Type10;
+  run_id: RunId16;
+  sequence: Sequence10;
+  input_tokens: InputTokens1;
+  output_tokens: OutputTokens1;
+  actual_cost_microusd: ActualCostMicrousd1;
+  is_final: IsFinal9;
 }

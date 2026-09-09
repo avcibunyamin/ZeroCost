@@ -10,6 +10,7 @@ from zerocost.models import AgentInput, ConnectionInput, WorkspaceInput
 from zerocost.sidecar import ChatService, dispatch
 from zerocost.storage import Store
 from zerocost.providers.base import Message, ProviderError
+from zerocost.pricing import TokenUsage
 
 
 @pytest.fixture
@@ -68,6 +69,15 @@ def test_invalid_requests_are_rejected_without_mutation(store, raw):
     assert store.snapshot().connections == []
 
 
+def test_pricing_catalog_is_available_over_ipc(store):
+    response = dispatch(store, request('pricing.catalog'))
+    assert response.ok
+    assert response.result.version == '2026-09-09'
+    assert response.result.currency == 'USD'
+    assert any(entry.model_pattern == 'gemini-2-5-flash'
+               for entry in response.result.entries)
+
+
 def test_workspace_resolves_symlink_and_rejects_missing(store, tmp_path):
     actual = tmp_path / 'project'
     actual.mkdir()
@@ -87,6 +97,7 @@ def test_workspace_read_requires_permission_and_stays_inside_root(store, tmp_pat
     root.mkdir()
     (root / 'notes.md').write_text('güvenli içerik', encoding='utf-8')
     (root / '.secret').write_text('hidden', encoding='utf-8')
+    (root / '.secret.md').write_text('hidden markdown', encoding='utf-8')
     (root / 'binary.txt').write_bytes(b'bad\x00value')
     (root / 'large.txt').write_text('x' * (128 * 1024 + 1), encoding='utf-8')
     outside = tmp_path / 'outside.md'
@@ -111,7 +122,7 @@ def test_workspace_read_requires_permission_and_stays_inside_root(store, tmp_pat
     read = dispatch(store, request('workspace.read', agent_id=agent.id,
                                    workspace_id=workspace.id, path='notes.md'))
     assert (read.result.content, read.result.size) == ('güvenli içerik', len('güvenli içerik'.encode()))
-    for path in ['../outside.md', str(outside), 'escape.md', 'large.txt', 'binary.txt']:
+    for path in ['../outside.md', str(outside), 'escape.md', 'large.txt', 'binary.txt', '.secret.md']:
         rejected = dispatch(store, request('workspace.read', agent_id=agent.id,
                                            workspace_id=workspace.id, path=path))
         assert not rejected.ok
@@ -160,7 +171,7 @@ def test_v4_orchestration_migrates_with_budget_defaults(tmp_path):
 
     migrated = Store(path)
     run = migrated.orchestration_history().runs[0]
-    assert migrated.snapshot().database_version == 5
+    assert migrated.snapshot().database_version == 6
     assert run.routing_mode == 'manual' and run.max_model_calls == 5
     assert run.agent_ids == [a.id for a in agents]
     assert migrated.db.execute('PRAGMA foreign_key_check').fetchall() == []
@@ -204,11 +215,13 @@ def test_oversize_frame_closes_protocol(tmp_path):
 
 
 class FakeProvider:
-    def __init__(self, tokens=('mer', 'haba'), failure=None, gate=None):
+    def __init__(self, tokens=('mer', 'haba'), failure=None, gate=None,
+                 usage=TokenUsage()):
         self.tokens = tokens
         self.failure = failure
         self.gate = gate
         self.messages = []
+        self.usage = usage
 
     async def stream_reply(self, messages: list[Message], *, api_key=None, max_tokens=512):
         self.messages = messages
@@ -307,10 +320,11 @@ def test_langgraph_multi_agent_round_is_attributed_and_persisted(tmp_path):
         assert [message.phase for message in history.messages] == ['analysis', 'analysis', 'synthesis']
         assert [event.type for event in events] == [
             'orchestration_route',
-            'orchestration_chunk', 'orchestration_message_end',
-            'orchestration_chunk', 'orchestration_message_end',
-            'orchestration_chunk', 'orchestration_message_end', 'orchestration_end']
-        assert [event.sequence for event in events] == list(range(1, 9))
+            'orchestration_chunk', 'orchestration_message_end', 'orchestration_usage',
+            'orchestration_chunk', 'orchestration_message_end', 'orchestration_usage',
+            'orchestration_chunk', 'orchestration_message_end', 'orchestration_usage',
+            'orchestration_end']
+        assert [event.sequence for event in events] == list(range(1, 12))
         assert history.used_model_calls == 3
         assert history.max_model_calls == 5
         assert (tmp_path / 'orchestration-checkpoints.sqlite3').exists()
@@ -426,5 +440,53 @@ def test_orchestration_budget_rejected_before_network(tmp_path):
             routing_mode='manual', max_model_calls=4, max_output_tokens=256))
         assert not response.ok
         assert provider.messages == [] and store.orchestration_history().runs == []
+        store.close()
+    asyncio.run(scenario())
+
+
+def test_fiat_budget_rejects_cloud_plan_before_network(tmp_path):
+    async def scenario():
+        store = Store(tmp_path / 'fiat.sqlite3')
+        store.create_connection(ConnectionInput(name='Gemini', provider='gemini',
+                                                model_id='gemini-2.5-flash'))
+        connection = store.snapshot().connections[0]
+        for name in ('Cloud A', 'Cloud B'):
+            store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+        provider = FakeProvider()
+        service = ChatService(store, lambda _: None, lambda *_: provider)
+        response = await service.handle(request(
+            'orchestration.start', run_id='fiat-limit', objective='Bütçeyi denetle',
+            agent_ids=[a.id for a in store.snapshot().agents], rounds=1,
+            max_model_calls=3, max_output_tokens=4096, max_cost_microusd=1),
+            auth={'credentials': {connection.id: 'synthetic'}})
+        assert not response.ok and 'maliyet' in response.message
+        assert provider.messages == [] and store.orchestration_history().runs == []
+        store.close()
+    asyncio.run(scenario())
+
+
+def test_cloud_usage_accumulates_token_based_list_cost(tmp_path):
+    async def scenario():
+        store = Store(tmp_path / 'usage.sqlite3')
+        store.create_connection(ConnectionInput(name='Gemini', provider='gemini',
+                                                model_id='gemini-2.5-flash'))
+        connection = store.snapshot().connections[0]
+        for name in ('Cloud A', 'Cloud B'):
+            store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+        events = []
+        service = ChatService(store, events.append, lambda *_: FakeProvider(
+            tokens=('ok',), usage=TokenUsage(input_tokens=1000, output_tokens=2000)))
+        response = await service.handle(request(
+            'orchestration.start', run_id='usage-cost', objective='Maliyeti kaydet',
+            agent_ids=[a.id for a in store.snapshot().agents], rounds=1,
+            max_model_calls=3, max_output_tokens=256, max_cost_microusd=1_000_000),
+            auth={'credentials': {connection.id: 'synthetic'}})
+        assert response.ok
+        await service.tasks['usage-cost']
+        run = store.orchestration_history().runs[0]
+        assert (run.input_tokens, run.output_tokens) == (3000, 6000)
+        assert run.actual_cost_microusd == 15_900
+        assert [event.actual_cost_microusd for event in events
+                if event.type == 'orchestration_usage'] == [5300, 10600, 15900]
         store.close()
     asyncio.run(scenario())

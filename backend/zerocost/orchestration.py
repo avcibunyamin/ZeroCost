@@ -8,10 +8,12 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command, interrupt
 from .models import (OrchestrationApprovalRequired, OrchestrationChunk,
-                     OrchestrationEnd, OrchestrationError, OrchestrationMessageEnd)
+                     OrchestrationEnd, OrchestrationError, OrchestrationMessageEnd,
+                     OrchestrationUsage)
 from .providers import get_provider
 from .providers.base import Message, ProviderError
 from .workspace_tools import read_file
+from .pricing import TokenUsage, cost_microusd
 
 
 class GraphState(TypedDict):
@@ -19,6 +21,7 @@ class GraphState(TypedDict):
     agent_ids: list[str]
     rounds: int
     max_output_tokens: int
+    max_cost_microusd: int
     current_round: int
     current_index: int
     event_sequence: int
@@ -123,6 +126,14 @@ class OrchestrationEngine:
         self.store.append_orchestration_message(run_id, message_sequence, agent_id, phase, content)
         self.output(OrchestrationMessageEnd(run_id=run_id, sequence=sequence, agent_id=agent_id,
                                             phase=phase, full_content=content))
+        usage = getattr(provider, 'usage', TokenUsage())
+        cost = cost_microusd(connection.provider, connection.model_id, usage)
+        totals = self.store.record_usage(run_id, usage.input_tokens, usage.output_tokens, cost)
+        sequence += 1
+        self.event_sequences[run_id] = sequence
+        self.output(OrchestrationUsage(run_id=run_id, sequence=sequence, **totals))
+        if totals['actual_cost_microusd'] > state['max_cost_microusd']:
+            raise ProviderError('Gerçek kullanım görev maliyet bütçesini aştı; kalan çağrılar durduruldu.')
         return content, sequence
 
     @staticmethod
@@ -207,6 +218,7 @@ class OrchestrationEngine:
                 invocation = Command(resume={'decision': resume}) if resume else {
                     'objective': params.objective, 'agent_ids': params.agent_ids,
                     'rounds': params.rounds, 'max_output_tokens': params.max_output_tokens,
+                    'max_cost_microusd': params.max_cost_microusd,
                     'current_round': 0, 'current_index': 0, 'event_sequence': 0,
                     'transcript': [], 'workspace_id': params.workspace_id,
                     'context_paths': params.context_paths, 'approved': None}

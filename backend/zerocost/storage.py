@@ -6,7 +6,7 @@ import sqlite3
 from uuid import uuid4
 from .models import Agent, AgentInput, Connection, ConnectionInput, Snapshot, Workspace, WorkspaceInput
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class Store:
@@ -127,6 +127,16 @@ class Store:
             """)
             self.db.execute("PRAGMA foreign_keys=ON")
 
+        if current < 6:
+            with self.db:
+                self.db.execute("ALTER TABLE orchestration_runs ADD COLUMN max_cost_microusd INTEGER NOT NULL DEFAULT 5000000")
+                self.db.execute("ALTER TABLE orchestration_runs ADD COLUMN estimated_max_cost_microusd INTEGER NOT NULL DEFAULT 0")
+                self.db.execute("ALTER TABLE orchestration_runs ADD COLUMN actual_cost_microusd INTEGER NOT NULL DEFAULT 0")
+                self.db.execute("ALTER TABLE orchestration_runs ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0")
+                self.db.execute("ALTER TABLE orchestration_runs ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0")
+                self.db.execute("ALTER TABLE orchestration_runs ADD COLUMN price_catalog_version TEXT NOT NULL DEFAULT '2026-09-09'")
+                self.db.execute("PRAGMA user_version=6")
+
     def close(self):
         self.db.close()
 
@@ -195,14 +205,19 @@ class Store:
     def start_orchestration(self, run_id: str, objective: str, rounds: int, agent_ids: list[str],
                             *, routing_mode: str = 'manual', route_reason: str = '',
                             max_model_calls: int = 5, max_output_tokens: int = 512,
-                            workspace_id: str | None = None, context_paths: list[str] | None = None):
+                            max_cost_microusd: int = 5_000_000,
+                            estimated_max_cost_microusd: int = 0,
+                            price_catalog_version: str = '2026-09-09', workspace_id: str | None = None,
+                            context_paths: list[str] | None = None):
         with self.db:
             self.db.execute("""INSERT INTO orchestration_runs
                 (run_id,objective,rounds,status,routing_mode,route_reason,max_model_calls,
-                 max_output_tokens,workspace_id,context_paths)
-                VALUES (?,?,?,'running',?,?,?,?,?,?)""",
+                 max_output_tokens,workspace_id,context_paths,max_cost_microusd,
+                 estimated_max_cost_microusd,price_catalog_version)
+                VALUES (?,?,?,'running',?,?,?,?,?,?,?,?,?)""",
                 (run_id, objective, rounds, routing_mode, route_reason, max_model_calls,
-                 max_output_tokens, workspace_id, json.dumps(context_paths or [])))
+                 max_output_tokens, workspace_id, json.dumps(context_paths or []), max_cost_microusd,
+                 estimated_max_cost_microusd, price_catalog_version))
             self.db.executemany("INSERT INTO orchestration_participants VALUES (?,?,?)",
                                 [(run_id, agent_id, position) for position, agent_id in enumerate(agent_ids)])
 
@@ -224,6 +239,16 @@ class Store:
         with self.db:
             self.db.execute("UPDATE orchestration_runs SET used_model_calls=used_model_calls+1 WHERE run_id=?",
                             (run_id,))
+
+    def record_usage(self, run_id: str, input_tokens: int, output_tokens: int, cost: int):
+        with self.db:
+            self.db.execute("""UPDATE orchestration_runs SET
+                input_tokens=input_tokens+?, output_tokens=output_tokens+?,
+                actual_cost_microusd=actual_cost_microusd+? WHERE run_id=?""",
+                (input_tokens, output_tokens, cost, run_id))
+        row = self.db.execute("""SELECT input_tokens,output_tokens,actual_cost_microusd
+            FROM orchestration_runs WHERE run_id=?""", (run_id,)).fetchone()
+        return dict(row)
 
     def orchestration_spec(self, run_id: str):
         row = self.db.execute("SELECT * FROM orchestration_runs WHERE run_id=?", (run_id,)).fetchone()
@@ -254,6 +279,11 @@ class Store:
                                          max_model_calls=row['max_model_calls'],
                                          max_output_tokens=row['max_output_tokens'],
                                          used_model_calls=row['used_model_calls'],
+                                         max_cost_microusd=row['max_cost_microusd'],
+                                         estimated_max_cost_microusd=row['estimated_max_cost_microusd'],
+                                         actual_cost_microusd=row['actual_cost_microusd'],
+                                         input_tokens=row['input_tokens'], output_tokens=row['output_tokens'],
+                                         price_catalog_version=row['price_catalog_version'],
                                          workspace_id=row['workspace_id'],
                                          context_paths=json.loads(row['context_paths']), messages=messages))
         return OrchestrationHistory(runs=runs)

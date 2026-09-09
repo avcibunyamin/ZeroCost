@@ -31,6 +31,7 @@ def test_anthropic_sdk_stream_system_and_auth(complete):
         provider = AnthropicProvider('test', transport=httpx.MockTransport(handler))
         if complete:
             assert [t async for t in provider.stream_reply(MESSAGES, api_key=SecretStr('synthetic-key'))] == ['merhaba']
+            assert (provider.usage.input_tokens, provider.usage.output_tokens) == (1, 1)
         else:
             with pytest.raises(ProviderError):
                 _ = [t async for t in provider.stream_reply(MESSAGES, api_key=SecretStr('synthetic-key'))]
@@ -49,7 +50,9 @@ def test_gemini_sdk_mapping_safety_and_terminal(finish):
         candidate = {'content': {'role': 'model', 'parts': [{'text': 'answer'}]}}
         if finish: candidate['finishReason'] = finish
         return httpx.Response(200, headers={'content-type': 'text/event-stream'},
-                              text='data: ' + json.dumps({'candidates': [candidate]}) + '\n\n')
+                              text='data: ' + json.dumps({'candidates': [candidate], 'usageMetadata': {
+                                  'promptTokenCount': 3, 'candidatesTokenCount': 4,
+                                  'thoughtsTokenCount': 2, 'totalTokenCount': 9}}) + '\n\n')
     def factory(**kwargs):
         kwargs['http_options'].httpx_async_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         return genai.Client(**kwargs)
@@ -58,6 +61,7 @@ def test_gemini_sdk_mapping_safety_and_terminal(finish):
         messages = [MESSAGES[0], Message(role='assistant', content='previous'), MESSAGES[1]]
         if finish == 'STOP':
             assert [t async for t in provider.stream_reply(messages, api_key=SecretStr('synthetic-key'))] == ['answer']
+            assert (provider.usage.input_tokens, provider.usage.output_tokens) == (3, 6)
         else:
             with pytest.raises(ProviderError):
                 _ = [t async for t in provider.stream_reply(messages, api_key=SecretStr('synthetic-key'))]

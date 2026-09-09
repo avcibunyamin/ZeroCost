@@ -26,6 +26,8 @@ def _target(store, agent_id: str, workspace_id: str, relative: str):
     path = Path(relative)
     if path.is_absolute():
         raise WorkspaceAccessError('Yalnızca çalışma alanına göreli yollar kullanılabilir.')
+    if any(part.startswith('.') or part in IGNORED_NAMES for part in path.parts):
+        raise WorkspaceAccessError('Gizli veya dışlanan yollar okunamaz.')
     root = Path(workspace.path).resolve(strict=True)
     try:
         target = (root / path).resolve(strict=True)
@@ -33,6 +35,16 @@ def _target(store, agent_id: str, workspace_id: str, relative: str):
     except (FileNotFoundError, RuntimeError, ValueError):
         raise WorkspaceAccessError('Yol çalışma alanının dışında veya bulunamadı.') from None
     return workspace, root, target
+
+
+def inspect_file_size(store, agent_id: str, workspace_id: str, relative: str):
+    _, _, target = _target(store, agent_id, workspace_id, relative)
+    if not target.is_file() or target.suffix.lower() not in TEXT_SUFFIXES:
+        raise WorkspaceAccessError('Bu dosya türü metin bağlamına alınamaz.')
+    size = target.stat().st_size
+    if size > MAX_FILE_BYTES:
+        raise WorkspaceAccessError('Dosya 128 KiB okuma sınırını aşıyor.')
+    return size
 
 
 def list_directory(store, agent_id: str, workspace_id: str, relative: str):

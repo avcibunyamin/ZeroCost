@@ -5,7 +5,7 @@ var schema13 = { "additionalProperties": false, "properties": { "protocol_versio
 var schema16 = { "additionalProperties": false, "properties": { "protocol_version": { "const": 1, "default": 1, "title": "Protocol Version", "type": "integer" }, "type": { "const": "orchestration_chunk", "default": "orchestration_chunk", "title": "Type", "type": "string" }, "run_id": { "title": "Run Id", "type": "string" }, "sequence": { "title": "Sequence", "type": "integer" }, "agent_id": { "title": "Agent Id", "type": "string" }, "phase": { "enum": ["analysis", "review", "synthesis"], "title": "Phase", "type": "string" }, "token": { "title": "Token", "type": "string" }, "is_final": { "const": false, "default": false, "title": "Is Final", "type": "boolean" } }, "required": ["protocol_version", "type", "run_id", "sequence", "agent_id", "phase", "token", "is_final"], "title": "OrchestrationChunk", "type": "object" };
 var schema17 = { "additionalProperties": false, "properties": { "protocol_version": { "const": 1, "default": 1, "title": "Protocol Version", "type": "integer" }, "type": { "const": "orchestration_message_end", "default": "orchestration_message_end", "title": "Type", "type": "string" }, "run_id": { "title": "Run Id", "type": "string" }, "sequence": { "title": "Sequence", "type": "integer" }, "agent_id": { "title": "Agent Id", "type": "string" }, "phase": { "enum": ["analysis", "review", "synthesis"], "title": "Phase", "type": "string" }, "full_content": { "title": "Full Content", "type": "string" }, "is_final": { "const": false, "default": false, "title": "Is Final", "type": "boolean" } }, "required": ["protocol_version", "type", "run_id", "sequence", "agent_id", "phase", "full_content", "is_final"], "title": "OrchestrationMessageEnd", "type": "object" };
 var schema18 = { "additionalProperties": false, "properties": { "protocol_version": { "const": 1, "default": 1, "title": "Protocol Version", "type": "integer" }, "type": { "const": "orchestration_end", "default": "orchestration_end", "title": "Type", "type": "string" }, "run_id": { "title": "Run Id", "type": "string" }, "sequence": { "title": "Sequence", "type": "integer" }, "status": { "enum": ["completed", "cancelled"], "title": "Status", "type": "string" }, "is_final": { "const": true, "default": true, "title": "Is Final", "type": "boolean" } }, "required": ["protocol_version", "type", "run_id", "sequence", "status", "is_final"], "title": "OrchestrationEnd", "type": "object" };
-var schema20 = { "additionalProperties": false, "properties": { "protocol_version": { "const": 1, "default": 1, "title": "Protocol Version", "type": "integer" }, "type": { "const": "orchestration_route", "default": "orchestration_route", "title": "Type", "type": "string" }, "run_id": { "title": "Run Id", "type": "string" }, "sequence": { "title": "Sequence", "type": "integer" }, "agent_ids": { "items": { "type": "string" }, "title": "Agent Ids", "type": "array" }, "reason": { "title": "Reason", "type": "string" }, "planned_model_calls": { "title": "Planned Model Calls", "type": "integer" }, "max_model_calls": { "title": "Max Model Calls", "type": "integer" }, "max_output_tokens": { "title": "Max Output Tokens", "type": "integer" }, "is_final": { "const": false, "default": false, "title": "Is Final", "type": "boolean" } }, "required": ["protocol_version", "type", "run_id", "sequence", "agent_ids", "reason", "planned_model_calls", "max_model_calls", "max_output_tokens", "is_final"], "title": "OrchestrationRoute", "type": "object" };
+var schema20 = { "additionalProperties": false, "properties": { "protocol_version": { "const": 1, "default": 1, "title": "Protocol Version", "type": "integer" }, "type": { "const": "orchestration_route", "default": "orchestration_route", "title": "Type", "type": "string" }, "run_id": { "title": "Run Id", "type": "string" }, "sequence": { "title": "Sequence", "type": "integer" }, "agent_ids": { "items": { "type": "string" }, "title": "Agent Ids", "type": "array" }, "reason": { "title": "Reason", "type": "string" }, "planned_model_calls": { "title": "Planned Model Calls", "type": "integer" }, "max_model_calls": { "title": "Max Model Calls", "type": "integer" }, "max_output_tokens": { "title": "Max Output Tokens", "type": "integer" }, "estimated_max_cost_microusd": { "title": "Estimated Max Cost Microusd", "type": "integer" }, "max_cost_microusd": { "title": "Max Cost Microusd", "type": "integer" }, "price_catalog_version": { "title": "Price Catalog Version", "type": "string" }, "is_final": { "const": false, "default": false, "title": "Is Final", "type": "boolean" } }, "required": ["protocol_version", "type", "run_id", "sequence", "agent_ids", "reason", "planned_model_calls", "max_model_calls", "max_output_tokens", "estimated_max_cost_microusd", "max_cost_microusd", "price_catalog_version", "is_final"], "title": "OrchestrationRoute", "type": "object" };
 var func2 = Object.prototype.hasOwnProperty;
 function validate10(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
@@ -1489,7 +1489,7 @@ function validate10(data, { instancePath = "", parentData, parentDataProperty, r
                   if (errors === _errs136) {
                     if (data && typeof data == "object" && !Array.isArray(data)) {
                       let missing8;
-                      if (data.protocol_version === void 0 && (missing8 = "protocol_version") || data.type === void 0 && (missing8 = "type") || data.run_id === void 0 && (missing8 = "run_id") || data.sequence === void 0 && (missing8 = "sequence") || data.agent_ids === void 0 && (missing8 = "agent_ids") || data.reason === void 0 && (missing8 = "reason") || data.planned_model_calls === void 0 && (missing8 = "planned_model_calls") || data.max_model_calls === void 0 && (missing8 = "max_model_calls") || data.max_output_tokens === void 0 && (missing8 = "max_output_tokens") || data.is_final === void 0 && (missing8 = "is_final")) {
+                      if (data.protocol_version === void 0 && (missing8 = "protocol_version") || data.type === void 0 && (missing8 = "type") || data.run_id === void 0 && (missing8 = "run_id") || data.sequence === void 0 && (missing8 = "sequence") || data.agent_ids === void 0 && (missing8 = "agent_ids") || data.reason === void 0 && (missing8 = "reason") || data.planned_model_calls === void 0 && (missing8 = "planned_model_calls") || data.max_model_calls === void 0 && (missing8 = "max_model_calls") || data.max_output_tokens === void 0 && (missing8 = "max_output_tokens") || data.estimated_max_cost_microusd === void 0 && (missing8 = "estimated_max_cost_microusd") || data.max_cost_microusd === void 0 && (missing8 = "max_cost_microusd") || data.price_catalog_version === void 0 && (missing8 = "price_catalog_version") || data.is_final === void 0 && (missing8 = "is_final")) {
                         const err102 = { instancePath, schemaPath: "#/$defs/OrchestrationRoute/required", keyword: "required", params: { missingProperty: missing8 }, message: "must have required property '" + missing8 + "'" };
                         if (vErrors === null) {
                           vErrors = [err102];
@@ -1702,11 +1702,11 @@ function validate10(data, { instancePath = "", parentData, parentDataProperty, r
                                             var valid18 = true;
                                           }
                                           if (valid18) {
-                                            if (data.is_final !== void 0) {
-                                              let data61 = data.is_final;
+                                            if (data.estimated_max_cost_microusd !== void 0) {
+                                              let data61 = data.estimated_max_cost_microusd;
                                               const _errs159 = errors;
-                                              if (typeof data61 !== "boolean") {
-                                                const err116 = { instancePath: instancePath + "/is_final", schemaPath: "#/$defs/OrchestrationRoute/properties/is_final/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" };
+                                              if (!(typeof data61 == "number" && (!(data61 % 1) && !isNaN(data61)))) {
+                                                const err116 = { instancePath: instancePath + "/estimated_max_cost_microusd", schemaPath: "#/$defs/OrchestrationRoute/properties/estimated_max_cost_microusd/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
                                                 if (vErrors === null) {
                                                   vErrors = [err116];
                                                 } else {
@@ -1714,18 +1714,71 @@ function validate10(data, { instancePath = "", parentData, parentDataProperty, r
                                                 }
                                                 errors++;
                                               }
-                                              if (false !== data61) {
-                                                const err117 = { instancePath: instancePath + "/is_final", schemaPath: "#/$defs/OrchestrationRoute/properties/is_final/const", keyword: "const", params: { allowedValue: false }, message: "must be equal to constant" };
-                                                if (vErrors === null) {
-                                                  vErrors = [err117];
-                                                } else {
-                                                  vErrors.push(err117);
-                                                }
-                                                errors++;
-                                              }
                                               var valid18 = _errs159 === errors;
                                             } else {
                                               var valid18 = true;
+                                            }
+                                            if (valid18) {
+                                              if (data.max_cost_microusd !== void 0) {
+                                                let data62 = data.max_cost_microusd;
+                                                const _errs161 = errors;
+                                                if (!(typeof data62 == "number" && (!(data62 % 1) && !isNaN(data62)))) {
+                                                  const err117 = { instancePath: instancePath + "/max_cost_microusd", schemaPath: "#/$defs/OrchestrationRoute/properties/max_cost_microusd/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err117];
+                                                  } else {
+                                                    vErrors.push(err117);
+                                                  }
+                                                  errors++;
+                                                }
+                                                var valid18 = _errs161 === errors;
+                                              } else {
+                                                var valid18 = true;
+                                              }
+                                              if (valid18) {
+                                                if (data.price_catalog_version !== void 0) {
+                                                  const _errs163 = errors;
+                                                  if (typeof data.price_catalog_version !== "string") {
+                                                    const err118 = { instancePath: instancePath + "/price_catalog_version", schemaPath: "#/$defs/OrchestrationRoute/properties/price_catalog_version/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err118];
+                                                    } else {
+                                                      vErrors.push(err118);
+                                                    }
+                                                    errors++;
+                                                  }
+                                                  var valid18 = _errs163 === errors;
+                                                } else {
+                                                  var valid18 = true;
+                                                }
+                                                if (valid18) {
+                                                  if (data.is_final !== void 0) {
+                                                    let data64 = data.is_final;
+                                                    const _errs165 = errors;
+                                                    if (typeof data64 !== "boolean") {
+                                                      const err119 = { instancePath: instancePath + "/is_final", schemaPath: "#/$defs/OrchestrationRoute/properties/is_final/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err119];
+                                                      } else {
+                                                        vErrors.push(err119);
+                                                      }
+                                                      errors++;
+                                                    }
+                                                    if (false !== data64) {
+                                                      const err120 = { instancePath: instancePath + "/is_final", schemaPath: "#/$defs/OrchestrationRoute/properties/is_final/const", keyword: "const", params: { allowedValue: false }, message: "must be equal to constant" };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err120];
+                                                      } else {
+                                                        vErrors.push(err120);
+                                                      }
+                                                      errors++;
+                                                    }
+                                                    var valid18 = _errs165 === errors;
+                                                  } else {
+                                                    var valid18 = true;
+                                                  }
+                                                }
+                                              }
                                             }
                                           }
                                         }
@@ -1739,11 +1792,11 @@ function validate10(data, { instancePath = "", parentData, parentDataProperty, r
                         }
                       }
                     } else {
-                      const err118 = { instancePath, schemaPath: "#/$defs/OrchestrationRoute/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+                      const err121 = { instancePath, schemaPath: "#/$defs/OrchestrationRoute/type", keyword: "type", params: { type: "object" }, message: "must be object" };
                       if (vErrors === null) {
-                        vErrors = [err118];
+                        vErrors = [err121];
                       } else {
-                        vErrors.push(err118);
+                        vErrors.push(err121);
                       }
                       errors++;
                     }
@@ -1751,221 +1804,221 @@ function validate10(data, { instancePath = "", parentData, parentDataProperty, r
                   var _valid0 = _errs135 === errors;
                   valid0 = valid0 || _valid0;
                   if (!valid0) {
-                    const _errs161 = errors;
-                    const _errs162 = errors;
-                    if (errors === _errs162) {
+                    const _errs167 = errors;
+                    const _errs168 = errors;
+                    if (errors === _errs168) {
                       if (data && typeof data == "object" && !Array.isArray(data)) {
                         let missing9;
                         if (data.protocol_version === void 0 && (missing9 = "protocol_version") || data.type === void 0 && (missing9 = "type") || data.run_id === void 0 && (missing9 = "run_id") || data.sequence === void 0 && (missing9 = "sequence") || data.permission === void 0 && (missing9 = "permission") || data.workspace_id === void 0 && (missing9 = "workspace_id") || data.paths === void 0 && (missing9 = "paths") || data.is_final === void 0 && (missing9 = "is_final")) {
-                          const err119 = { instancePath, schemaPath: "#/$defs/OrchestrationApprovalRequired/required", keyword: "required", params: { missingProperty: missing9 }, message: "must have required property '" + missing9 + "'" };
+                          const err122 = { instancePath, schemaPath: "#/$defs/OrchestrationApprovalRequired/required", keyword: "required", params: { missingProperty: missing9 }, message: "must have required property '" + missing9 + "'" };
                           if (vErrors === null) {
-                            vErrors = [err119];
+                            vErrors = [err122];
                           } else {
-                            vErrors.push(err119);
+                            vErrors.push(err122);
                           }
                           errors++;
                         } else {
-                          const _errs164 = errors;
+                          const _errs170 = errors;
                           for (const key9 in data) {
                             if (!(key9 === "protocol_version" || key9 === "type" || key9 === "run_id" || key9 === "sequence" || key9 === "permission" || key9 === "workspace_id" || key9 === "paths" || key9 === "is_final")) {
-                              const err120 = { instancePath, schemaPath: "#/$defs/OrchestrationApprovalRequired/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key9 }, message: "must NOT have additional properties" };
+                              const err123 = { instancePath, schemaPath: "#/$defs/OrchestrationApprovalRequired/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key9 }, message: "must NOT have additional properties" };
                               if (vErrors === null) {
-                                vErrors = [err120];
+                                vErrors = [err123];
                               } else {
-                                vErrors.push(err120);
+                                vErrors.push(err123);
                               }
                               errors++;
                               break;
                             }
                           }
-                          if (_errs164 === errors) {
+                          if (_errs170 === errors) {
                             if (data.protocol_version !== void 0) {
-                              let data62 = data.protocol_version;
-                              const _errs165 = errors;
-                              if (!(typeof data62 == "number" && (!(data62 % 1) && !isNaN(data62)))) {
-                                const err121 = { instancePath: instancePath + "/protocol_version", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/protocol_version/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
+                              let data65 = data.protocol_version;
+                              const _errs171 = errors;
+                              if (!(typeof data65 == "number" && (!(data65 % 1) && !isNaN(data65)))) {
+                                const err124 = { instancePath: instancePath + "/protocol_version", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/protocol_version/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
                                 if (vErrors === null) {
-                                  vErrors = [err121];
+                                  vErrors = [err124];
                                 } else {
-                                  vErrors.push(err121);
+                                  vErrors.push(err124);
                                 }
                                 errors++;
                               }
-                              if (1 !== data62) {
-                                const err122 = { instancePath: instancePath + "/protocol_version", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/protocol_version/const", keyword: "const", params: { allowedValue: 1 }, message: "must be equal to constant" };
+                              if (1 !== data65) {
+                                const err125 = { instancePath: instancePath + "/protocol_version", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/protocol_version/const", keyword: "const", params: { allowedValue: 1 }, message: "must be equal to constant" };
                                 if (vErrors === null) {
-                                  vErrors = [err122];
+                                  vErrors = [err125];
                                 } else {
-                                  vErrors.push(err122);
+                                  vErrors.push(err125);
                                 }
                                 errors++;
                               }
-                              var valid21 = _errs165 === errors;
+                              var valid21 = _errs171 === errors;
                             } else {
                               var valid21 = true;
                             }
                             if (valid21) {
                               if (data.type !== void 0) {
-                                let data63 = data.type;
-                                const _errs167 = errors;
-                                if (typeof data63 !== "string") {
-                                  const err123 = { instancePath: instancePath + "/type", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/type/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                let data66 = data.type;
+                                const _errs173 = errors;
+                                if (typeof data66 !== "string") {
+                                  const err126 = { instancePath: instancePath + "/type", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/type/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                   if (vErrors === null) {
-                                    vErrors = [err123];
+                                    vErrors = [err126];
                                   } else {
-                                    vErrors.push(err123);
+                                    vErrors.push(err126);
                                   }
                                   errors++;
                                 }
-                                if ("orchestration_approval_required" !== data63) {
-                                  const err124 = { instancePath: instancePath + "/type", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/type/const", keyword: "const", params: { allowedValue: "orchestration_approval_required" }, message: "must be equal to constant" };
+                                if ("orchestration_approval_required" !== data66) {
+                                  const err127 = { instancePath: instancePath + "/type", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/type/const", keyword: "const", params: { allowedValue: "orchestration_approval_required" }, message: "must be equal to constant" };
                                   if (vErrors === null) {
-                                    vErrors = [err124];
+                                    vErrors = [err127];
                                   } else {
-                                    vErrors.push(err124);
+                                    vErrors.push(err127);
                                   }
                                   errors++;
                                 }
-                                var valid21 = _errs167 === errors;
+                                var valid21 = _errs173 === errors;
                               } else {
                                 var valid21 = true;
                               }
                               if (valid21) {
                                 if (data.run_id !== void 0) {
-                                  const _errs169 = errors;
+                                  const _errs175 = errors;
                                   if (typeof data.run_id !== "string") {
-                                    const err125 = { instancePath: instancePath + "/run_id", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/run_id/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                    const err128 = { instancePath: instancePath + "/run_id", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/run_id/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                     if (vErrors === null) {
-                                      vErrors = [err125];
+                                      vErrors = [err128];
                                     } else {
-                                      vErrors.push(err125);
+                                      vErrors.push(err128);
                                     }
                                     errors++;
                                   }
-                                  var valid21 = _errs169 === errors;
+                                  var valid21 = _errs175 === errors;
                                 } else {
                                   var valid21 = true;
                                 }
                                 if (valid21) {
                                   if (data.sequence !== void 0) {
-                                    let data65 = data.sequence;
-                                    const _errs171 = errors;
-                                    if (!(typeof data65 == "number" && (!(data65 % 1) && !isNaN(data65)))) {
-                                      const err126 = { instancePath: instancePath + "/sequence", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/sequence/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
+                                    let data68 = data.sequence;
+                                    const _errs177 = errors;
+                                    if (!(typeof data68 == "number" && (!(data68 % 1) && !isNaN(data68)))) {
+                                      const err129 = { instancePath: instancePath + "/sequence", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/sequence/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
                                       if (vErrors === null) {
-                                        vErrors = [err126];
+                                        vErrors = [err129];
                                       } else {
-                                        vErrors.push(err126);
+                                        vErrors.push(err129);
                                       }
                                       errors++;
                                     }
-                                    var valid21 = _errs171 === errors;
+                                    var valid21 = _errs177 === errors;
                                   } else {
                                     var valid21 = true;
                                   }
                                   if (valid21) {
                                     if (data.permission !== void 0) {
-                                      let data66 = data.permission;
-                                      const _errs173 = errors;
-                                      if (typeof data66 !== "string") {
-                                        const err127 = { instancePath: instancePath + "/permission", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/permission/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                      let data69 = data.permission;
+                                      const _errs179 = errors;
+                                      if (typeof data69 !== "string") {
+                                        const err130 = { instancePath: instancePath + "/permission", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/permission/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                         if (vErrors === null) {
-                                          vErrors = [err127];
+                                          vErrors = [err130];
                                         } else {
-                                          vErrors.push(err127);
+                                          vErrors.push(err130);
                                         }
                                         errors++;
                                       }
-                                      if ("workspace.read" !== data66) {
-                                        const err128 = { instancePath: instancePath + "/permission", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/permission/const", keyword: "const", params: { allowedValue: "workspace.read" }, message: "must be equal to constant" };
+                                      if ("workspace.read" !== data69) {
+                                        const err131 = { instancePath: instancePath + "/permission", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/permission/const", keyword: "const", params: { allowedValue: "workspace.read" }, message: "must be equal to constant" };
                                         if (vErrors === null) {
-                                          vErrors = [err128];
+                                          vErrors = [err131];
                                         } else {
-                                          vErrors.push(err128);
+                                          vErrors.push(err131);
                                         }
                                         errors++;
                                       }
-                                      var valid21 = _errs173 === errors;
+                                      var valid21 = _errs179 === errors;
                                     } else {
                                       var valid21 = true;
                                     }
                                     if (valid21) {
                                       if (data.workspace_id !== void 0) {
-                                        const _errs175 = errors;
+                                        const _errs181 = errors;
                                         if (typeof data.workspace_id !== "string") {
-                                          const err129 = { instancePath: instancePath + "/workspace_id", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/workspace_id/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                          const err132 = { instancePath: instancePath + "/workspace_id", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/workspace_id/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                           if (vErrors === null) {
-                                            vErrors = [err129];
+                                            vErrors = [err132];
                                           } else {
-                                            vErrors.push(err129);
+                                            vErrors.push(err132);
                                           }
                                           errors++;
                                         }
-                                        var valid21 = _errs175 === errors;
+                                        var valid21 = _errs181 === errors;
                                       } else {
                                         var valid21 = true;
                                       }
                                       if (valid21) {
                                         if (data.paths !== void 0) {
-                                          let data68 = data.paths;
-                                          const _errs177 = errors;
-                                          if (errors === _errs177) {
-                                            if (Array.isArray(data68)) {
+                                          let data71 = data.paths;
+                                          const _errs183 = errors;
+                                          if (errors === _errs183) {
+                                            if (Array.isArray(data71)) {
                                               var valid22 = true;
-                                              const len1 = data68.length;
+                                              const len1 = data71.length;
                                               for (let i1 = 0; i1 < len1; i1++) {
-                                                const _errs179 = errors;
-                                                if (typeof data68[i1] !== "string") {
-                                                  const err130 = { instancePath: instancePath + "/paths/" + i1, schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/paths/items/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                const _errs185 = errors;
+                                                if (typeof data71[i1] !== "string") {
+                                                  const err133 = { instancePath: instancePath + "/paths/" + i1, schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/paths/items/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                                                   if (vErrors === null) {
-                                                    vErrors = [err130];
+                                                    vErrors = [err133];
                                                   } else {
-                                                    vErrors.push(err130);
+                                                    vErrors.push(err133);
                                                   }
                                                   errors++;
                                                 }
-                                                var valid22 = _errs179 === errors;
+                                                var valid22 = _errs185 === errors;
                                                 if (!valid22) {
                                                   break;
                                                 }
                                               }
                                             } else {
-                                              const err131 = { instancePath: instancePath + "/paths", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/paths/type", keyword: "type", params: { type: "array" }, message: "must be array" };
+                                              const err134 = { instancePath: instancePath + "/paths", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/paths/type", keyword: "type", params: { type: "array" }, message: "must be array" };
                                               if (vErrors === null) {
-                                                vErrors = [err131];
+                                                vErrors = [err134];
                                               } else {
-                                                vErrors.push(err131);
+                                                vErrors.push(err134);
                                               }
                                               errors++;
                                             }
                                           }
-                                          var valid21 = _errs177 === errors;
+                                          var valid21 = _errs183 === errors;
                                         } else {
                                           var valid21 = true;
                                         }
                                         if (valid21) {
                                           if (data.is_final !== void 0) {
-                                            let data70 = data.is_final;
-                                            const _errs181 = errors;
-                                            if (typeof data70 !== "boolean") {
-                                              const err132 = { instancePath: instancePath + "/is_final", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/is_final/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" };
+                                            let data73 = data.is_final;
+                                            const _errs187 = errors;
+                                            if (typeof data73 !== "boolean") {
+                                              const err135 = { instancePath: instancePath + "/is_final", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/is_final/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" };
                                               if (vErrors === null) {
-                                                vErrors = [err132];
+                                                vErrors = [err135];
                                               } else {
-                                                vErrors.push(err132);
+                                                vErrors.push(err135);
                                               }
                                               errors++;
                                             }
-                                            if (false !== data70) {
-                                              const err133 = { instancePath: instancePath + "/is_final", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/is_final/const", keyword: "const", params: { allowedValue: false }, message: "must be equal to constant" };
+                                            if (false !== data73) {
+                                              const err136 = { instancePath: instancePath + "/is_final", schemaPath: "#/$defs/OrchestrationApprovalRequired/properties/is_final/const", keyword: "const", params: { allowedValue: false }, message: "must be equal to constant" };
                                               if (vErrors === null) {
-                                                vErrors = [err133];
+                                                vErrors = [err136];
                                               } else {
-                                                vErrors.push(err133);
+                                                vErrors.push(err136);
                                               }
                                               errors++;
                                             }
-                                            var valid21 = _errs181 === errors;
+                                            var valid21 = _errs187 === errors;
                                           } else {
                                             var valid21 = true;
                                           }
@@ -1979,17 +2032,229 @@ function validate10(data, { instancePath = "", parentData, parentDataProperty, r
                           }
                         }
                       } else {
-                        const err134 = { instancePath, schemaPath: "#/$defs/OrchestrationApprovalRequired/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+                        const err137 = { instancePath, schemaPath: "#/$defs/OrchestrationApprovalRequired/type", keyword: "type", params: { type: "object" }, message: "must be object" };
                         if (vErrors === null) {
-                          vErrors = [err134];
+                          vErrors = [err137];
                         } else {
-                          vErrors.push(err134);
+                          vErrors.push(err137);
                         }
                         errors++;
                       }
                     }
-                    var _valid0 = _errs161 === errors;
+                    var _valid0 = _errs167 === errors;
                     valid0 = valid0 || _valid0;
+                    if (!valid0) {
+                      const _errs189 = errors;
+                      const _errs190 = errors;
+                      if (errors === _errs190) {
+                        if (data && typeof data == "object" && !Array.isArray(data)) {
+                          let missing10;
+                          if (data.protocol_version === void 0 && (missing10 = "protocol_version") || data.type === void 0 && (missing10 = "type") || data.run_id === void 0 && (missing10 = "run_id") || data.sequence === void 0 && (missing10 = "sequence") || data.input_tokens === void 0 && (missing10 = "input_tokens") || data.output_tokens === void 0 && (missing10 = "output_tokens") || data.actual_cost_microusd === void 0 && (missing10 = "actual_cost_microusd") || data.is_final === void 0 && (missing10 = "is_final")) {
+                            const err138 = { instancePath, schemaPath: "#/$defs/OrchestrationUsage/required", keyword: "required", params: { missingProperty: missing10 }, message: "must have required property '" + missing10 + "'" };
+                            if (vErrors === null) {
+                              vErrors = [err138];
+                            } else {
+                              vErrors.push(err138);
+                            }
+                            errors++;
+                          } else {
+                            const _errs192 = errors;
+                            for (const key10 in data) {
+                              if (!(key10 === "protocol_version" || key10 === "type" || key10 === "run_id" || key10 === "sequence" || key10 === "input_tokens" || key10 === "output_tokens" || key10 === "actual_cost_microusd" || key10 === "is_final")) {
+                                const err139 = { instancePath, schemaPath: "#/$defs/OrchestrationUsage/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key10 }, message: "must NOT have additional properties" };
+                                if (vErrors === null) {
+                                  vErrors = [err139];
+                                } else {
+                                  vErrors.push(err139);
+                                }
+                                errors++;
+                                break;
+                              }
+                            }
+                            if (_errs192 === errors) {
+                              if (data.protocol_version !== void 0) {
+                                let data74 = data.protocol_version;
+                                const _errs193 = errors;
+                                if (!(typeof data74 == "number" && (!(data74 % 1) && !isNaN(data74)))) {
+                                  const err140 = { instancePath: instancePath + "/protocol_version", schemaPath: "#/$defs/OrchestrationUsage/properties/protocol_version/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
+                                  if (vErrors === null) {
+                                    vErrors = [err140];
+                                  } else {
+                                    vErrors.push(err140);
+                                  }
+                                  errors++;
+                                }
+                                if (1 !== data74) {
+                                  const err141 = { instancePath: instancePath + "/protocol_version", schemaPath: "#/$defs/OrchestrationUsage/properties/protocol_version/const", keyword: "const", params: { allowedValue: 1 }, message: "must be equal to constant" };
+                                  if (vErrors === null) {
+                                    vErrors = [err141];
+                                  } else {
+                                    vErrors.push(err141);
+                                  }
+                                  errors++;
+                                }
+                                var valid24 = _errs193 === errors;
+                              } else {
+                                var valid24 = true;
+                              }
+                              if (valid24) {
+                                if (data.type !== void 0) {
+                                  let data75 = data.type;
+                                  const _errs195 = errors;
+                                  if (typeof data75 !== "string") {
+                                    const err142 = { instancePath: instancePath + "/type", schemaPath: "#/$defs/OrchestrationUsage/properties/type/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                    if (vErrors === null) {
+                                      vErrors = [err142];
+                                    } else {
+                                      vErrors.push(err142);
+                                    }
+                                    errors++;
+                                  }
+                                  if ("orchestration_usage" !== data75) {
+                                    const err143 = { instancePath: instancePath + "/type", schemaPath: "#/$defs/OrchestrationUsage/properties/type/const", keyword: "const", params: { allowedValue: "orchestration_usage" }, message: "must be equal to constant" };
+                                    if (vErrors === null) {
+                                      vErrors = [err143];
+                                    } else {
+                                      vErrors.push(err143);
+                                    }
+                                    errors++;
+                                  }
+                                  var valid24 = _errs195 === errors;
+                                } else {
+                                  var valid24 = true;
+                                }
+                                if (valid24) {
+                                  if (data.run_id !== void 0) {
+                                    const _errs197 = errors;
+                                    if (typeof data.run_id !== "string") {
+                                      const err144 = { instancePath: instancePath + "/run_id", schemaPath: "#/$defs/OrchestrationUsage/properties/run_id/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                      if (vErrors === null) {
+                                        vErrors = [err144];
+                                      } else {
+                                        vErrors.push(err144);
+                                      }
+                                      errors++;
+                                    }
+                                    var valid24 = _errs197 === errors;
+                                  } else {
+                                    var valid24 = true;
+                                  }
+                                  if (valid24) {
+                                    if (data.sequence !== void 0) {
+                                      let data77 = data.sequence;
+                                      const _errs199 = errors;
+                                      if (!(typeof data77 == "number" && (!(data77 % 1) && !isNaN(data77)))) {
+                                        const err145 = { instancePath: instancePath + "/sequence", schemaPath: "#/$defs/OrchestrationUsage/properties/sequence/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
+                                        if (vErrors === null) {
+                                          vErrors = [err145];
+                                        } else {
+                                          vErrors.push(err145);
+                                        }
+                                        errors++;
+                                      }
+                                      var valid24 = _errs199 === errors;
+                                    } else {
+                                      var valid24 = true;
+                                    }
+                                    if (valid24) {
+                                      if (data.input_tokens !== void 0) {
+                                        let data78 = data.input_tokens;
+                                        const _errs201 = errors;
+                                        if (!(typeof data78 == "number" && (!(data78 % 1) && !isNaN(data78)))) {
+                                          const err146 = { instancePath: instancePath + "/input_tokens", schemaPath: "#/$defs/OrchestrationUsage/properties/input_tokens/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
+                                          if (vErrors === null) {
+                                            vErrors = [err146];
+                                          } else {
+                                            vErrors.push(err146);
+                                          }
+                                          errors++;
+                                        }
+                                        var valid24 = _errs201 === errors;
+                                      } else {
+                                        var valid24 = true;
+                                      }
+                                      if (valid24) {
+                                        if (data.output_tokens !== void 0) {
+                                          let data79 = data.output_tokens;
+                                          const _errs203 = errors;
+                                          if (!(typeof data79 == "number" && (!(data79 % 1) && !isNaN(data79)))) {
+                                            const err147 = { instancePath: instancePath + "/output_tokens", schemaPath: "#/$defs/OrchestrationUsage/properties/output_tokens/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
+                                            if (vErrors === null) {
+                                              vErrors = [err147];
+                                            } else {
+                                              vErrors.push(err147);
+                                            }
+                                            errors++;
+                                          }
+                                          var valid24 = _errs203 === errors;
+                                        } else {
+                                          var valid24 = true;
+                                        }
+                                        if (valid24) {
+                                          if (data.actual_cost_microusd !== void 0) {
+                                            let data80 = data.actual_cost_microusd;
+                                            const _errs205 = errors;
+                                            if (!(typeof data80 == "number" && (!(data80 % 1) && !isNaN(data80)))) {
+                                              const err148 = { instancePath: instancePath + "/actual_cost_microusd", schemaPath: "#/$defs/OrchestrationUsage/properties/actual_cost_microusd/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
+                                              if (vErrors === null) {
+                                                vErrors = [err148];
+                                              } else {
+                                                vErrors.push(err148);
+                                              }
+                                              errors++;
+                                            }
+                                            var valid24 = _errs205 === errors;
+                                          } else {
+                                            var valid24 = true;
+                                          }
+                                          if (valid24) {
+                                            if (data.is_final !== void 0) {
+                                              let data81 = data.is_final;
+                                              const _errs207 = errors;
+                                              if (typeof data81 !== "boolean") {
+                                                const err149 = { instancePath: instancePath + "/is_final", schemaPath: "#/$defs/OrchestrationUsage/properties/is_final/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" };
+                                                if (vErrors === null) {
+                                                  vErrors = [err149];
+                                                } else {
+                                                  vErrors.push(err149);
+                                                }
+                                                errors++;
+                                              }
+                                              if (false !== data81) {
+                                                const err150 = { instancePath: instancePath + "/is_final", schemaPath: "#/$defs/OrchestrationUsage/properties/is_final/const", keyword: "const", params: { allowedValue: false }, message: "must be equal to constant" };
+                                                if (vErrors === null) {
+                                                  vErrors = [err150];
+                                                } else {
+                                                  vErrors.push(err150);
+                                                }
+                                                errors++;
+                                              }
+                                              var valid24 = _errs207 === errors;
+                                            } else {
+                                              var valid24 = true;
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        } else {
+                          const err151 = { instancePath, schemaPath: "#/$defs/OrchestrationUsage/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+                          if (vErrors === null) {
+                            vErrors = [err151];
+                          } else {
+                            vErrors.push(err151);
+                          }
+                          errors++;
+                        }
+                      }
+                      var _valid0 = _errs189 === errors;
+                      valid0 = valid0 || _valid0;
+                    }
                   }
                 }
               }
@@ -2000,11 +2265,11 @@ function validate10(data, { instancePath = "", parentData, parentDataProperty, r
     }
   }
   if (!valid0) {
-    const err135 = { instancePath, schemaPath: "#/anyOf", keyword: "anyOf", params: {}, message: "must match a schema in anyOf" };
+    const err152 = { instancePath, schemaPath: "#/anyOf", keyword: "anyOf", params: {}, message: "must match a schema in anyOf" };
     if (vErrors === null) {
-      vErrors = [err135];
+      vErrors = [err152];
     } else {
-      vErrors.push(err135);
+      vErrors.push(err152);
     }
     errors++;
     validate10.errors = vErrors;

@@ -15,8 +15,9 @@ from types import SimpleNamespace
 from pydantic import TypeAdapter, ValidationError, SecretStr
 from .models import Request, Failure, Success
 from .storage import Store
-from .workspace_tools import list_directory, read_file
+from .workspace_tools import inspect_file_size, list_directory, read_file
 from .models import OrchestrationEnd, OrchestrationRoute
+from .pricing import CATALOG_VERSION, catalog, estimate_plan
 
 MAX_FRAME_BYTES = 64 * 1024
 request_adapter = TypeAdapter(Request)
@@ -43,6 +44,8 @@ def dispatch(store: Store, raw: str):
         elif request.method == "workspace.read":
             return Success(request_id=request.request_id, result=read_file(
                 store, request.params.agent_id, request.params.workspace_id, request.params.path))
+        elif request.method == "pricing.catalog":
+            return Success(request_id=request.request_id, result=catalog())
         elif request.method != "snapshot":
             raise ValueError("Bu komut asenkron servis gerektirir.")
         return Success(request_id=request.request_id, result=store.snapshot())
@@ -158,13 +161,28 @@ class ChatService:
                                                             self.provider_factory)
                 routed_ids, reason, planned = self.orchestrator.route(params, snapshot)
                 params = params.model_copy(update={'agent_ids': routed_ids})
+                context_bytes = sum(inspect_file_size(
+                    self.store, agents[0].id, params.workspace_id, path)
+                    for path in params.context_paths) if params.context_paths else 0
+                estimated_cost = estimate_plan(snapshot, params.agent_ids, params.rounds,
+                    params.objective, context_bytes, params.max_output_tokens)
+                if estimated_cost > params.max_cost_microusd:
+                    raise ValueError(
+                        f'Tahmini üst maliyet ${estimated_cost / 1_000_000:.4f}; '
+                        f'görev bütçesi ${params.max_cost_microusd / 1_000_000:.4f}.')
                 self.store.start_orchestration(params.run_id, params.objective, params.rounds,
                     params.agent_ids, routing_mode=params.routing_mode, route_reason=reason,
                     max_model_calls=params.max_model_calls, max_output_tokens=params.max_output_tokens,
+                    max_cost_microusd=params.max_cost_microusd,
+                    estimated_max_cost_microusd=estimated_cost,
+                    price_catalog_version=CATALOG_VERSION,
                     workspace_id=params.workspace_id, context_paths=params.context_paths)
                 self.output(OrchestrationRoute(run_id=params.run_id, sequence=1,
                     agent_ids=params.agent_ids, reason=reason, planned_model_calls=planned,
-                    max_model_calls=params.max_model_calls, max_output_tokens=params.max_output_tokens))
+                    max_model_calls=params.max_model_calls, max_output_tokens=params.max_output_tokens,
+                    estimated_max_cost_microusd=estimated_cost,
+                    max_cost_microusd=params.max_cost_microusd,
+                    price_catalog_version=CATALOG_VERSION))
                 task = asyncio.create_task(self.run_orchestration(params, credentials,
                                                                   initial_sequence=1))
                 self.tasks[params.run_id] = task
