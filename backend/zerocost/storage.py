@@ -1,0 +1,259 @@
+"""SQLite repository; schema changes are applied transactionally."""
+from __future__ import annotations
+from pathlib import Path
+import json
+import sqlite3
+from uuid import uuid4
+from .models import Agent, AgentInput, Connection, ConnectionInput, Snapshot, Workspace, WorkspaceInput
+
+SCHEMA_VERSION = 5
+
+
+class Store:
+    def __init__(self, path: Path):
+        self.path = path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.db = sqlite3.connect(path, timeout=5)
+        self.db.row_factory = sqlite3.Row
+        self.db.execute("PRAGMA foreign_keys=ON")
+        self.db.execute("PRAGMA journal_mode=WAL")
+        current = self.db.execute("PRAGMA user_version").fetchone()[0]
+        if current > SCHEMA_VERSION:
+            self.db.close()
+            raise RuntimeError("Database belongs to a newer version of ZeroCost")
+        if current == 0:
+            self.db.executescript("""
+                BEGIN IMMEDIATE;
+                CREATE TABLE connections (
+                    id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+                    provider TEXT NOT NULL CHECK(provider IN ('ollama','lmstudio','anthropic','gemini','openai')),
+                    model_id TEXT NOT NULL
+                );
+                CREATE TABLE agents (
+                    id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, role TEXT NOT NULL,
+                    connection_id TEXT NOT NULL REFERENCES connections(id) ON DELETE RESTRICT,
+                    instructions TEXT NOT NULL
+                );
+                CREATE INDEX agents_connection ON agents(connection_id);
+                CREATE TABLE workspaces (
+                    id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE
+                );
+                PRAGMA user_version=1;
+                COMMIT;
+            """)
+
+        if current < 2:
+            self.db.executescript("""
+                BEGIN IMMEDIATE;
+                CREATE TABLE chat_runs (
+                    run_id TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL REFERENCES agents(id),
+                    prompt TEXT NOT NULL, content TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL CHECK(status IN ('running','completed','cancelled','failed','interrupted')),
+                    error TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX chat_agent ON chat_runs(agent_id);
+                PRAGMA user_version=2;
+                COMMIT;
+            """)
+
+        if current < 3:
+            self.db.executescript("""
+                BEGIN IMMEDIATE;
+                CREATE TABLE agent_permissions (
+                    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+                    permission TEXT NOT NULL CHECK(permission IN ('workspace.read')),
+                    PRIMARY KEY(agent_id, permission)
+                );
+                PRAGMA user_version=3;
+                COMMIT;
+            """)
+
+        if current < 4:
+            self.db.executescript("""
+                BEGIN IMMEDIATE;
+                CREATE TABLE orchestration_runs (
+                    run_id TEXT PRIMARY KEY,
+                    objective TEXT NOT NULL,
+                    rounds INTEGER NOT NULL CHECK(rounds BETWEEN 1 AND 3),
+                    status TEXT NOT NULL CHECK(status IN ('running','completed','cancelled','failed','interrupted')),
+                    error TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE orchestration_participants (
+                    run_id TEXT NOT NULL REFERENCES orchestration_runs(run_id) ON DELETE CASCADE,
+                    agent_id TEXT NOT NULL REFERENCES agents(id), position INTEGER NOT NULL,
+                    PRIMARY KEY(run_id, agent_id), UNIQUE(run_id, position)
+                );
+                CREATE TABLE orchestration_messages (
+                    run_id TEXT NOT NULL REFERENCES orchestration_runs(run_id) ON DELETE CASCADE,
+                    sequence INTEGER NOT NULL, agent_id TEXT NOT NULL REFERENCES agents(id),
+                    phase TEXT NOT NULL CHECK(phase IN ('analysis','review','synthesis')),
+                    content TEXT NOT NULL,
+                    PRIMARY KEY(run_id, sequence)
+                );
+                CREATE INDEX orchestration_created ON orchestration_runs(created_at);
+                PRAGMA user_version=4;
+                COMMIT;
+            """)
+
+        if current < 5:
+            self.db.execute("PRAGMA foreign_keys=OFF")
+            self.db.executescript("""
+                BEGIN IMMEDIATE;
+                CREATE TABLE orchestration_runs_v5 (
+                    run_id TEXT PRIMARY KEY,
+                    objective TEXT NOT NULL,
+                    rounds INTEGER NOT NULL CHECK(rounds BETWEEN 1 AND 3),
+                    status TEXT NOT NULL CHECK(status IN ('running','waiting_approval','completed','cancelled','failed','interrupted')),
+                    error TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    routing_mode TEXT NOT NULL DEFAULT 'manual' CHECK(routing_mode IN ('manual','auto')),
+                    route_reason TEXT NOT NULL DEFAULT '',
+                    max_model_calls INTEGER NOT NULL DEFAULT 5 CHECK(max_model_calls BETWEEN 3 AND 13),
+                    max_output_tokens INTEGER NOT NULL DEFAULT 512 CHECK(max_output_tokens BETWEEN 128 AND 4096),
+                    used_model_calls INTEGER NOT NULL DEFAULT 0,
+                    workspace_id TEXT REFERENCES workspaces(id),
+                    context_paths TEXT NOT NULL DEFAULT '[]'
+                );
+                INSERT INTO orchestration_runs_v5
+                    (run_id,objective,rounds,status,error,created_at)
+                    SELECT run_id,objective,rounds,status,error,created_at FROM orchestration_runs;
+                DROP TABLE orchestration_runs;
+                ALTER TABLE orchestration_runs_v5 RENAME TO orchestration_runs;
+                CREATE INDEX orchestration_created ON orchestration_runs(created_at);
+                PRAGMA user_version=5;
+                COMMIT;
+            """)
+            self.db.execute("PRAGMA foreign_keys=ON")
+
+    def close(self):
+        self.db.close()
+
+    def snapshot(self) -> Snapshot:
+        return Snapshot(
+            database_version=self.db.execute("PRAGMA user_version").fetchone()[0],
+            connections=[Connection(**dict(row)) for row in self.db.execute("SELECT * FROM connections ORDER BY rowid")],
+            agents=[Agent(**dict(row), permissions=[p[0] for p in self.db.execute(
+                "SELECT permission FROM agent_permissions WHERE agent_id=? ORDER BY permission", (row["id"],))])
+                    for row in self.db.execute("SELECT * FROM agents ORDER BY rowid")],
+            workspaces=[Workspace(**dict(row)) for row in self.db.execute("SELECT * FROM workspaces ORDER BY rowid")],
+        )
+
+    def create_connection(self, value: ConnectionInput):
+        with self.db:
+            self.db.execute("INSERT INTO connections VALUES (?, ?, ?, ?)",
+                            (str(uuid4()), value.name, value.provider, value.model_id))
+
+    def create_agent(self, value: AgentInput):
+        with self.db:
+            self.db.execute("INSERT INTO agents VALUES (?, ?, ?, ?, ?)",
+                            (str(uuid4()), value.name, value.role, value.connection_id, value.instructions))
+
+    def create_workspace(self, value: WorkspaceInput):
+        raw = Path(value.path).expanduser()
+        if not raw.is_absolute():
+            raise ValueError("Çalışma alanı için mutlak bir klasör yolu girin.")
+        path = raw.resolve(strict=True)
+        if not path.is_dir():
+            raise ValueError("Çalışma alanı mevcut bir klasör olmalı.")
+        with self.db:
+            self.db.execute("INSERT INTO workspaces VALUES (?, ?, ?)", (str(uuid4()), value.name, str(path)))
+
+    def set_agent_permissions(self, agent_id: str, permissions: list[str]):
+        if not self.db.execute("SELECT 1 FROM agents WHERE id=?", (agent_id,)).fetchone():
+            raise ValueError("Ajan bulunamadı.")
+        with self.db:
+            self.db.execute("DELETE FROM agent_permissions WHERE agent_id=?", (agent_id,))
+            self.db.executemany("INSERT INTO agent_permissions VALUES (?,?)",
+                                [(agent_id, permission) for permission in permissions])
+
+    def agent(self, agent_id: str) -> Agent | None:
+        return next((agent for agent in self.snapshot().agents if agent.id == agent_id), None)
+
+    def workspace(self, workspace_id: str) -> Workspace | None:
+        return next((workspace for workspace in self.snapshot().workspaces if workspace.id == workspace_id), None)
+
+    def history(self, agent_id: str):
+        from .models import ChatHistory, ChatTurn
+        rows = self.db.execute("SELECT * FROM (SELECT rowid AS position, * FROM chat_runs WHERE agent_id=? ORDER BY rowid DESC LIMIT 50) ORDER BY position", (agent_id,))
+        return ChatHistory(turns=[ChatTurn(**{k: row[k] for k in row.keys() if k != "position"}) for row in rows])
+
+    def start_run(self, run_id: str, agent_id: str, prompt: str):
+        with self.db:
+            self.db.execute("INSERT INTO chat_runs(run_id,agent_id,prompt,status) VALUES (?,?,?,'running')", (run_id, agent_id, prompt))
+
+    def update_run(self, run_id: str, content: str, status: str, error: str = ""):
+        with self.db:
+            self.db.execute("UPDATE chat_runs SET content=?,status=?,error=? WHERE run_id=?", (content, status, error, run_id))
+
+    def recover_runs(self):
+        with self.db:
+            self.db.execute("UPDATE chat_runs SET status='interrupted',error='Uygulama bağlantısı kesildi.' WHERE status='running'")
+            self.db.execute("UPDATE orchestration_runs SET status='interrupted',error='Uygulama bağlantısı kesildi.' WHERE status='running'")
+
+    def start_orchestration(self, run_id: str, objective: str, rounds: int, agent_ids: list[str],
+                            *, routing_mode: str = 'manual', route_reason: str = '',
+                            max_model_calls: int = 5, max_output_tokens: int = 512,
+                            workspace_id: str | None = None, context_paths: list[str] | None = None):
+        with self.db:
+            self.db.execute("""INSERT INTO orchestration_runs
+                (run_id,objective,rounds,status,routing_mode,route_reason,max_model_calls,
+                 max_output_tokens,workspace_id,context_paths)
+                VALUES (?,?,?,'running',?,?,?,?,?,?)""",
+                (run_id, objective, rounds, routing_mode, route_reason, max_model_calls,
+                 max_output_tokens, workspace_id, json.dumps(context_paths or [])))
+            self.db.executemany("INSERT INTO orchestration_participants VALUES (?,?,?)",
+                                [(run_id, agent_id, position) for position, agent_id in enumerate(agent_ids)])
+
+    def append_orchestration_message(self, run_id: str, sequence: int, agent_id: str,
+                                     phase: str, content: str):
+        with self.db:
+            self.db.execute("INSERT INTO orchestration_messages VALUES (?,?,?,?,?)",
+                            (run_id, sequence, agent_id, phase, content))
+
+    def finish_orchestration(self, run_id: str, status: str, error: str = ""):
+        with self.db:
+            self.db.execute("UPDATE orchestration_runs SET status=?,error=? WHERE run_id=?",
+                            (status, error, run_id))
+
+    def set_orchestration_status(self, run_id: str, status: str, error: str = ""):
+        self.finish_orchestration(run_id, status, error)
+
+    def increment_model_calls(self, run_id: str):
+        with self.db:
+            self.db.execute("UPDATE orchestration_runs SET used_model_calls=used_model_calls+1 WHERE run_id=?",
+                            (run_id,))
+
+    def orchestration_spec(self, run_id: str):
+        row = self.db.execute("SELECT * FROM orchestration_runs WHERE run_id=?", (run_id,)).fetchone()
+        if row is None:
+            return None
+        agent_ids = [item[0] for item in self.db.execute(
+            "SELECT agent_id FROM orchestration_participants WHERE run_id=? ORDER BY position", (run_id,))]
+        return {**dict(row), 'agent_ids': agent_ids, 'context_paths': json.loads(row['context_paths'])}
+
+    def waiting_orchestration(self):
+        row = self.db.execute("""SELECT run_id FROM orchestration_runs
+            WHERE status='waiting_approval' ORDER BY created_at DESC,rowid DESC LIMIT 1""").fetchone()
+        return row['run_id'] if row else None
+
+    def orchestration_history(self):
+        from .models import OrchestrationHistory, OrchestrationMessage, OrchestrationRun
+        runs = []
+        rows = self.db.execute("SELECT * FROM orchestration_runs ORDER BY created_at DESC,rowid DESC LIMIT 20")
+        for row in rows:
+            agent_ids = [item[0] for item in self.db.execute(
+                "SELECT agent_id FROM orchestration_participants WHERE run_id=? ORDER BY position", (row['run_id'],))]
+            messages = [OrchestrationMessage(**dict(item)) for item in self.db.execute(
+                "SELECT sequence,agent_id,phase,content FROM orchestration_messages WHERE run_id=? ORDER BY sequence",
+                (row['run_id'],))]
+            runs.append(OrchestrationRun(run_id=row['run_id'], objective=row['objective'], rounds=row['rounds'],
+                                         status=row['status'], error=row['error'], agent_ids=agent_ids,
+                                         routing_mode=row['routing_mode'], route_reason=row['route_reason'],
+                                         max_model_calls=row['max_model_calls'],
+                                         max_output_tokens=row['max_output_tokens'],
+                                         used_model_calls=row['used_model_calls'],
+                                         workspace_id=row['workspace_id'],
+                                         context_paths=json.loads(row['context_paths']), messages=messages))
+        return OrchestrationHistory(runs=runs)

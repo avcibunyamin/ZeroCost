@@ -1,0 +1,97 @@
+"""Request-scoped clients. SDK exceptions never cross the IPC boundary."""
+import httpx
+import logging
+from anthropic import AsyncAnthropic
+from google import genai
+from google.genai import types
+from .base import ProviderAdapter, ProviderError
+
+# SDK debug logging may include HTTP headers; it must never be enabled in the sidecar.
+for name in ('anthropic', 'google.genai', 'google_genai', 'httpx', 'httpcore'):
+    logging.getLogger(name).setLevel(logging.CRITICAL)
+
+
+def split_messages(messages):
+    return ('\n\n'.join(m.content for m in messages if m.role == 'system'),
+            [m for m in messages if m.role != 'system'])
+
+
+def require_key(api_key):
+    if not api_key:
+        raise ProviderError('Bu bağlantıya Model bağlantıları ekranından API anahtarı ekleyin.')
+    return api_key.get_secret_value()
+
+
+class AnthropicProvider(ProviderAdapter):
+    def __init__(self, model, client_factory=AsyncAnthropic, transport=None):
+        self.model = model
+        self.client_factory = client_factory
+        self.transport = transport
+
+    async def stream_reply(self, messages, *, api_key=None, max_tokens=512):
+        key = require_key(api_key)
+        system, conversation = split_messages(messages)
+        try:
+            async with httpx.AsyncClient(trust_env=False, follow_redirects=False, timeout=90, transport=self.transport) as http:
+                async with self.client_factory(api_key=key, base_url='https://api.anthropic.com',
+                                               max_retries=0, http_client=http) as client:
+                    async with client.messages.stream(model=self.model, system=system, max_tokens=max_tokens,
+                            messages=[m.model_dump() for m in conversation]) as stream:
+                        ended = False
+                        async for event in stream:
+                            if event.type == 'content_block_delta' and event.delta.type == 'text_delta':
+                                yield event.delta.text
+                            if event.type == 'message_stop':
+                                ended = True
+                        final = await stream.get_final_message()
+                        if not ended or final.stop_reason != 'end_turn':
+                            raise ProviderError('Claude yanıtı sınır veya sağlayıcı kararı nedeniyle tamamlanamadı.')
+        except ProviderError:
+            raise
+        except Exception:
+            raise ProviderError('Claude isteği başarısız. API anahtarını, model erişimini ve kotayı kontrol edin.') from None
+
+
+class GeminiProvider(ProviderAdapter):
+    def __init__(self, model, client_factory=genai.Client):
+        self.model = model
+        self.client_factory = client_factory
+
+    async def stream_reply(self, messages, *, api_key=None, max_tokens=512):
+        key = require_key(api_key)
+        system, conversation = split_messages(messages)
+        config = types.GenerateContentConfig(system_instruction=system, max_output_tokens=max_tokens,
+            safety_settings=[types.SafetySetting(category='HARM_CATEGORY_' + category, threshold='BLOCK_NONE')
+                             for category in ('HARASSMENT', 'HATE_SPEECH', 'SEXUALLY_EXPLICIT', 'DANGEROUS_CONTENT')])
+        contents = [types.Content(role='model' if m.role == 'assistant' else 'user',
+                    parts=[types.Part.from_text(text=m.content)]) for m in conversation]
+        client = None
+        try:
+            client = self.client_factory(api_key=key, vertexai=False, http_options=types.HttpOptions(
+                base_url='https://generativelanguage.googleapis.com', timeout=90000,
+                retry_options=types.HttpRetryOptions(attempts=1),
+                client_args={'trust_env': False, 'follow_redirects': False},
+                async_client_args={'trust_env': False, 'follow_redirects': False}))
+            finished = False
+            async with client.aio as aio:
+                async for chunk in await aio.models.generate_content_stream(model=self.model, contents=contents, config=config):
+                    for candidate in chunk.candidates or []:
+                        if candidate.content:
+                            for part in candidate.content.parts or []:
+                                if part.text and not part.thought:
+                                    yield part.text
+                        if candidate.finish_reason:
+                            if candidate.finish_reason != types.FinishReason.STOP:
+                                raise ProviderError('Gemini yanıtı sınır veya sağlayıcı kararı nedeniyle tamamlanamadı.')
+                            finished = True
+                    if chunk.prompt_feedback and chunk.prompt_feedback.block_reason:
+                        raise ProviderError('Gemini isteği sağlayıcı tarafından engellendi.')
+            if not finished:
+                raise ProviderError('Gemini akışı tamamlanmadan bağlantı kapandı.')
+        except ProviderError:
+            raise
+        except Exception:
+            raise ProviderError('Gemini isteği başarısız. API anahtarını, model erişimini ve kotayı kontrol edin.') from None
+        finally:
+            if client is not None:
+                client.close()

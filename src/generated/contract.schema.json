@@ -1,0 +1,2186 @@
+{
+  "$defs": {
+    "Accepted": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "title": "Accepted",
+      "type": "object"
+    },
+    "Agent": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "role": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "connection_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Connection Id",
+          "type": "string"
+        },
+        "instructions": {
+          "default": "",
+          "maxLength": 8000,
+          "title": "Instructions",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "const": "workspace.read",
+            "type": "string"
+          },
+          "title": "Permissions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "role",
+        "connection_id",
+        "instructions",
+        "id",
+        "permissions"
+      ],
+      "title": "Agent",
+      "type": "object"
+    },
+    "AgentInput": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "role": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "connection_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Connection Id",
+          "type": "string"
+        },
+        "instructions": {
+          "default": "",
+          "maxLength": 8000,
+          "title": "Instructions",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "role",
+        "connection_id",
+        "instructions"
+      ],
+      "title": "AgentInput",
+      "type": "object"
+    },
+    "AgentPermissionsInput": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "const": "workspace.read",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Permissions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "agent_id",
+        "permissions"
+      ],
+      "title": "AgentPermissionsInput",
+      "type": "object"
+    },
+    "AgentPermissionsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "agent.permissions.set",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/AgentPermissionsInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "AgentPermissionsRequest",
+      "type": "object"
+    },
+    "AgentRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "agent.create",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/AgentInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "AgentRequest",
+      "type": "object"
+    },
+    "CancelRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "chat.cancel",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/RunInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "CancelRequest",
+      "type": "object"
+    },
+    "ChatHistory": {
+      "additionalProperties": false,
+      "properties": {
+        "turns": {
+          "items": {
+            "$ref": "#/$defs/ChatTurn"
+          },
+          "title": "Turns",
+          "type": "array"
+        }
+      },
+      "required": [
+        "turns"
+      ],
+      "title": "ChatHistory",
+      "type": "object"
+    },
+    "ChatStartInput": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "agent_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 12000,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "agent_id",
+        "message"
+      ],
+      "title": "ChatStartInput",
+      "type": "object"
+    },
+    "ChatStartRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "chat.start",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/ChatStartInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "ChatStartRequest",
+      "type": "object"
+    },
+    "ChatTurn": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "prompt": {
+          "title": "Prompt",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "running",
+            "completed",
+            "cancelled",
+            "failed",
+            "interrupted"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "error": {
+          "title": "Error",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "agent_id",
+        "prompt",
+        "content",
+        "status",
+        "error"
+      ],
+      "title": "ChatTurn",
+      "type": "object"
+    },
+    "Connection": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "provider": {
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "anthropic",
+            "gemini",
+            "openai"
+          ],
+          "title": "Provider",
+          "type": "string"
+        },
+        "model_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "status": {
+          "const": "unconfigured",
+          "default": "unconfigured",
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "provider",
+        "model_id",
+        "id",
+        "status"
+      ],
+      "title": "Connection",
+      "type": "object"
+    },
+    "ConnectionInput": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "provider": {
+          "enum": [
+            "ollama",
+            "lmstudio",
+            "anthropic",
+            "gemini",
+            "openai"
+          ],
+          "title": "Provider",
+          "type": "string"
+        },
+        "model_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "provider",
+        "model_id"
+      ],
+      "title": "ConnectionInput",
+      "type": "object"
+    },
+    "ConnectionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "connection.create",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/ConnectionInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "ConnectionRequest",
+      "type": "object"
+    },
+    "Failure": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "ok": {
+          "const": false,
+          "default": false,
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "code": {
+          "enum": [
+            "invalid_request",
+            "conflict",
+            "not_found",
+            "internal_error"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "ok",
+        "code",
+        "message"
+      ],
+      "title": "Failure",
+      "type": "object"
+    },
+    "HistoryInput": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id"
+      ],
+      "title": "HistoryInput",
+      "type": "object"
+    },
+    "HistoryRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "chat.history",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/HistoryInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "HistoryRequest",
+      "type": "object"
+    },
+    "ModelsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "ollama.models",
+          "title": "Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method"
+      ],
+      "title": "ModelsRequest",
+      "type": "object"
+    },
+    "OllamaModel": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "size": {
+          "title": "Size",
+          "type": "integer"
+        },
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Capabilities",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "size",
+        "capabilities"
+      ],
+      "title": "OllamaModel",
+      "type": "object"
+    },
+    "OllamaModels": {
+      "additionalProperties": false,
+      "properties": {
+        "models": {
+          "items": {
+            "$ref": "#/$defs/OllamaModel"
+          },
+          "title": "Models",
+          "type": "array"
+        }
+      },
+      "required": [
+        "models"
+      ],
+      "title": "OllamaModels",
+      "type": "object"
+    },
+    "OrchestrationApprovalInput": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "decision": {
+          "enum": [
+            "approve",
+            "reject"
+          ],
+          "title": "Decision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "decision"
+      ],
+      "title": "OrchestrationApprovalInput",
+      "type": "object"
+    },
+    "OrchestrationApprovalRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "orchestration.approve",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/OrchestrationApprovalInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "OrchestrationApprovalRequest",
+      "type": "object"
+    },
+    "OrchestrationApprovalRequired": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "type": {
+          "const": "orchestration_approval_required",
+          "default": "orchestration_approval_required",
+          "title": "Type",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "permission": {
+          "const": "workspace.read",
+          "default": "workspace.read",
+          "title": "Permission",
+          "type": "string"
+        },
+        "workspace_id": {
+          "title": "Workspace Id",
+          "type": "string"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Paths",
+          "type": "array"
+        },
+        "is_final": {
+          "const": false,
+          "default": false,
+          "title": "Is Final",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "type",
+        "run_id",
+        "sequence",
+        "permission",
+        "workspace_id",
+        "paths",
+        "is_final"
+      ],
+      "title": "OrchestrationApprovalRequired",
+      "type": "object"
+    },
+    "OrchestrationCancelRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "orchestration.cancel",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/RunInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "OrchestrationCancelRequest",
+      "type": "object"
+    },
+    "OrchestrationChunk": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "type": {
+          "const": "orchestration_chunk",
+          "default": "orchestration_chunk",
+          "title": "Type",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "analysis",
+            "review",
+            "synthesis"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "token": {
+          "title": "Token",
+          "type": "string"
+        },
+        "is_final": {
+          "const": false,
+          "default": false,
+          "title": "Is Final",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "type",
+        "run_id",
+        "sequence",
+        "agent_id",
+        "phase",
+        "token",
+        "is_final"
+      ],
+      "title": "OrchestrationChunk",
+      "type": "object"
+    },
+    "OrchestrationEnd": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "type": {
+          "const": "orchestration_end",
+          "default": "orchestration_end",
+          "title": "Type",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "is_final": {
+          "const": true,
+          "default": true,
+          "title": "Is Final",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "type",
+        "run_id",
+        "sequence",
+        "status",
+        "is_final"
+      ],
+      "title": "OrchestrationEnd",
+      "type": "object"
+    },
+    "OrchestrationError": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "type": {
+          "const": "orchestration_error",
+          "default": "orchestration_error",
+          "title": "Type",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "is_final": {
+          "const": true,
+          "default": true,
+          "title": "Is Final",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "type",
+        "run_id",
+        "sequence",
+        "message",
+        "is_final"
+      ],
+      "title": "OrchestrationError",
+      "type": "object"
+    },
+    "OrchestrationHistory": {
+      "additionalProperties": false,
+      "properties": {
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/OrchestrationRun"
+          },
+          "title": "Runs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "runs"
+      ],
+      "title": "OrchestrationHistory",
+      "type": "object"
+    },
+    "OrchestrationHistoryRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "orchestration.history",
+          "title": "Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method"
+      ],
+      "title": "OrchestrationHistoryRequest",
+      "type": "object"
+    },
+    "OrchestrationMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "analysis",
+            "review",
+            "synthesis"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sequence",
+        "agent_id",
+        "phase",
+        "content"
+      ],
+      "title": "OrchestrationMessage",
+      "type": "object"
+    },
+    "OrchestrationMessageEnd": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "type": {
+          "const": "orchestration_message_end",
+          "default": "orchestration_message_end",
+          "title": "Type",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "analysis",
+            "review",
+            "synthesis"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "full_content": {
+          "title": "Full Content",
+          "type": "string"
+        },
+        "is_final": {
+          "const": false,
+          "default": false,
+          "title": "Is Final",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "type",
+        "run_id",
+        "sequence",
+        "agent_id",
+        "phase",
+        "full_content",
+        "is_final"
+      ],
+      "title": "OrchestrationMessageEnd",
+      "type": "object"
+    },
+    "OrchestrationRoute": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "type": {
+          "const": "orchestration_route",
+          "default": "orchestration_route",
+          "title": "Type",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "agent_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Agent Ids",
+          "type": "array"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "planned_model_calls": {
+          "title": "Planned Model Calls",
+          "type": "integer"
+        },
+        "max_model_calls": {
+          "title": "Max Model Calls",
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "is_final": {
+          "const": false,
+          "default": false,
+          "title": "Is Final",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "type",
+        "run_id",
+        "sequence",
+        "agent_ids",
+        "reason",
+        "planned_model_calls",
+        "max_model_calls",
+        "max_output_tokens",
+        "is_final"
+      ],
+      "title": "OrchestrationRoute",
+      "type": "object"
+    },
+    "OrchestrationRun": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "objective": {
+          "title": "Objective",
+          "type": "string"
+        },
+        "agent_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Agent Ids",
+          "type": "array"
+        },
+        "rounds": {
+          "title": "Rounds",
+          "type": "integer"
+        },
+        "routing_mode": {
+          "enum": [
+            "manual",
+            "auto"
+          ],
+          "title": "Routing Mode",
+          "type": "string"
+        },
+        "route_reason": {
+          "title": "Route Reason",
+          "type": "string"
+        },
+        "max_model_calls": {
+          "title": "Max Model Calls",
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "used_model_calls": {
+          "title": "Used Model Calls",
+          "type": "integer"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Workspace Id"
+        },
+        "context_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Context Paths",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "running",
+            "waiting_approval",
+            "completed",
+            "cancelled",
+            "failed",
+            "interrupted"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "error": {
+          "title": "Error",
+          "type": "string"
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/$defs/OrchestrationMessage"
+          },
+          "title": "Messages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "run_id",
+        "objective",
+        "agent_ids",
+        "rounds",
+        "routing_mode",
+        "route_reason",
+        "max_model_calls",
+        "max_output_tokens",
+        "used_model_calls",
+        "workspace_id",
+        "context_paths",
+        "status",
+        "error",
+        "messages"
+      ],
+      "title": "OrchestrationRun",
+      "type": "object"
+    },
+    "OrchestrationStartInput": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "objective": {
+          "maxLength": 12000,
+          "minLength": 1,
+          "title": "Objective",
+          "type": "string"
+        },
+        "agent_ids": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 4,
+          "minItems": 2,
+          "title": "Agent Ids",
+          "type": "array"
+        },
+        "rounds": {
+          "default": 1,
+          "maximum": 3,
+          "minimum": 1,
+          "title": "Rounds",
+          "type": "integer"
+        },
+        "routing_mode": {
+          "default": "manual",
+          "enum": [
+            "manual",
+            "auto"
+          ],
+          "title": "Routing Mode",
+          "type": "string"
+        },
+        "max_model_calls": {
+          "default": 5,
+          "maximum": 13,
+          "minimum": 3,
+          "title": "Max Model Calls",
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "default": 512,
+          "maximum": 4096,
+          "minimum": 128,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workspace Id"
+        },
+        "context_paths": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Context Paths",
+          "type": "array"
+        }
+      },
+      "required": [
+        "run_id",
+        "objective",
+        "agent_ids",
+        "rounds",
+        "routing_mode",
+        "max_model_calls",
+        "max_output_tokens",
+        "workspace_id",
+        "context_paths"
+      ],
+      "title": "OrchestrationStartInput",
+      "type": "object"
+    },
+    "OrchestrationStartRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "orchestration.start",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/OrchestrationStartInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "OrchestrationStartRequest",
+      "type": "object"
+    },
+    "RunInput": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "title": "RunInput",
+      "type": "object"
+    },
+    "Snapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "app_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "App Version",
+          "type": "string"
+        },
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "database_version": {
+          "title": "Database Version",
+          "type": "integer"
+        },
+        "connections": {
+          "items": {
+            "$ref": "#/$defs/Connection"
+          },
+          "title": "Connections",
+          "type": "array"
+        },
+        "agents": {
+          "items": {
+            "$ref": "#/$defs/Agent"
+          },
+          "title": "Agents",
+          "type": "array"
+        },
+        "workspaces": {
+          "items": {
+            "$ref": "#/$defs/Workspace"
+          },
+          "title": "Workspaces",
+          "type": "array"
+        }
+      },
+      "required": [
+        "app_version",
+        "protocol_version",
+        "database_version",
+        "connections",
+        "agents",
+        "workspaces"
+      ],
+      "title": "Snapshot",
+      "type": "object"
+    },
+    "SnapshotRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "snapshot",
+          "title": "Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method"
+      ],
+      "title": "SnapshotRequest",
+      "type": "object"
+    },
+    "StreamChunk": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "type": {
+          "const": "stream_chunk",
+          "default": "stream_chunk",
+          "title": "Type",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "token": {
+          "title": "Token",
+          "type": "string"
+        },
+        "is_final": {
+          "const": false,
+          "default": false,
+          "title": "Is Final",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "type",
+        "run_id",
+        "sequence",
+        "token",
+        "is_final"
+      ],
+      "title": "StreamChunk",
+      "type": "object"
+    },
+    "StreamEnd": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "type": {
+          "const": "stream_end",
+          "default": "stream_end",
+          "title": "Type",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "full_content": {
+          "title": "Full Content",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "is_final": {
+          "const": true,
+          "default": true,
+          "title": "Is Final",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "type",
+        "run_id",
+        "sequence",
+        "full_content",
+        "status",
+        "is_final"
+      ],
+      "title": "StreamEnd",
+      "type": "object"
+    },
+    "StreamError": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "type": {
+          "const": "stream_error",
+          "default": "stream_error",
+          "title": "Type",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "full_content": {
+          "title": "Full Content",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "is_final": {
+          "const": true,
+          "default": true,
+          "title": "Is Final",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "type",
+        "run_id",
+        "sequence",
+        "full_content",
+        "message",
+        "is_final"
+      ],
+      "title": "StreamError",
+      "type": "object"
+    },
+    "Success": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "ok": {
+          "const": true,
+          "default": true,
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Snapshot"
+            },
+            {
+              "$ref": "#/$defs/OllamaModels"
+            },
+            {
+              "$ref": "#/$defs/ChatHistory"
+            },
+            {
+              "$ref": "#/$defs/Accepted"
+            },
+            {
+              "$ref": "#/$defs/VaultStatus"
+            },
+            {
+              "$ref": "#/$defs/WorkspaceListing"
+            },
+            {
+              "$ref": "#/$defs/WorkspaceFile"
+            },
+            {
+              "$ref": "#/$defs/OrchestrationHistory"
+            }
+          ],
+          "title": "Result"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "ok",
+        "result"
+      ],
+      "title": "Success",
+      "type": "object"
+    },
+    "TransportError": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "type": {
+          "const": "transport_error",
+          "default": "transport_error",
+          "title": "Type",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "type",
+        "message"
+      ],
+      "title": "TransportError",
+      "type": "object"
+    },
+    "VaultInput": {
+      "additionalProperties": false,
+      "properties": {
+        "connection_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Connection Id",
+          "type": "string"
+        },
+        "action": {
+          "enum": [
+            "status",
+            "save",
+            "delete"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "secret": {
+          "default": "",
+          "maxLength": 4096,
+          "title": "Secret",
+          "type": "string"
+        }
+      },
+      "required": [
+        "connection_id",
+        "action",
+        "secret"
+      ],
+      "title": "VaultInput",
+      "type": "object"
+    },
+    "VaultRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "vault",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/VaultInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "VaultRequest",
+      "type": "object"
+    },
+    "VaultStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "connection_id": {
+          "title": "Connection Id",
+          "type": "string"
+        },
+        "has_key": {
+          "title": "Has Key",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "connection_id",
+        "has_key"
+      ],
+      "title": "VaultStatus",
+      "type": "object"
+    },
+    "Workspace": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "id"
+      ],
+      "title": "Workspace",
+      "type": "object"
+    },
+    "WorkspaceEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "file",
+            "directory"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "size": {
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "kind",
+        "size"
+      ],
+      "title": "WorkspaceEntry",
+      "type": "object"
+    },
+    "WorkspaceFile": {
+      "additionalProperties": false,
+      "properties": {
+        "workspace_id": {
+          "title": "Workspace Id",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "size": {
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "path",
+        "content",
+        "size"
+      ],
+      "title": "WorkspaceFile",
+      "type": "object"
+    },
+    "WorkspaceInput": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ],
+      "title": "WorkspaceInput",
+      "type": "object"
+    },
+    "WorkspaceListRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "workspace.list",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/WorkspaceTarget"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "WorkspaceListRequest",
+      "type": "object"
+    },
+    "WorkspaceListing": {
+      "additionalProperties": false,
+      "properties": {
+        "workspace_id": {
+          "title": "Workspace Id",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/WorkspaceEntry"
+          },
+          "title": "Entries",
+          "type": "array"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "path",
+        "entries"
+      ],
+      "title": "WorkspaceListing",
+      "type": "object"
+    },
+    "WorkspaceReadRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "workspace.read",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/WorkspaceTarget"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "WorkspaceReadRequest",
+      "type": "object"
+    },
+    "WorkspaceRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "workspace.create",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/WorkspaceInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "WorkspaceRequest",
+      "type": "object"
+    },
+    "WorkspaceTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "workspace_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Workspace Id",
+          "type": "string"
+        },
+        "path": {
+          "default": "",
+          "maxLength": 4096,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "workspace_id",
+        "path"
+      ],
+      "title": "WorkspaceTarget",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "request": {
+      "discriminator": {
+        "mapping": {
+          "agent.create": "#/$defs/AgentRequest",
+          "agent.permissions.set": "#/$defs/AgentPermissionsRequest",
+          "chat.cancel": "#/$defs/CancelRequest",
+          "chat.history": "#/$defs/HistoryRequest",
+          "chat.start": "#/$defs/ChatStartRequest",
+          "connection.create": "#/$defs/ConnectionRequest",
+          "ollama.models": "#/$defs/ModelsRequest",
+          "orchestration.approve": "#/$defs/OrchestrationApprovalRequest",
+          "orchestration.cancel": "#/$defs/OrchestrationCancelRequest",
+          "orchestration.history": "#/$defs/OrchestrationHistoryRequest",
+          "orchestration.start": "#/$defs/OrchestrationStartRequest",
+          "snapshot": "#/$defs/SnapshotRequest",
+          "vault": "#/$defs/VaultRequest",
+          "workspace.create": "#/$defs/WorkspaceRequest",
+          "workspace.list": "#/$defs/WorkspaceListRequest",
+          "workspace.read": "#/$defs/WorkspaceReadRequest"
+        },
+        "propertyName": "method"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SnapshotRequest"
+        },
+        {
+          "$ref": "#/$defs/ConnectionRequest"
+        },
+        {
+          "$ref": "#/$defs/AgentRequest"
+        },
+        {
+          "$ref": "#/$defs/WorkspaceRequest"
+        },
+        {
+          "$ref": "#/$defs/AgentPermissionsRequest"
+        },
+        {
+          "$ref": "#/$defs/WorkspaceListRequest"
+        },
+        {
+          "$ref": "#/$defs/WorkspaceReadRequest"
+        },
+        {
+          "$ref": "#/$defs/ModelsRequest"
+        },
+        {
+          "$ref": "#/$defs/ChatStartRequest"
+        },
+        {
+          "$ref": "#/$defs/CancelRequest"
+        },
+        {
+          "$ref": "#/$defs/HistoryRequest"
+        },
+        {
+          "$ref": "#/$defs/VaultRequest"
+        },
+        {
+          "$ref": "#/$defs/OrchestrationStartRequest"
+        },
+        {
+          "$ref": "#/$defs/OrchestrationCancelRequest"
+        },
+        {
+          "$ref": "#/$defs/OrchestrationApprovalRequest"
+        },
+        {
+          "$ref": "#/$defs/OrchestrationHistoryRequest"
+        }
+      ],
+      "title": "Request"
+    },
+    "response": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Success"
+        },
+        {
+          "$ref": "#/$defs/Failure"
+        }
+      ],
+      "title": "Response"
+    },
+    "event": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/StreamChunk"
+        },
+        {
+          "$ref": "#/$defs/StreamEnd"
+        },
+        {
+          "$ref": "#/$defs/StreamError"
+        },
+        {
+          "$ref": "#/$defs/TransportError"
+        },
+        {
+          "$ref": "#/$defs/OrchestrationChunk"
+        },
+        {
+          "$ref": "#/$defs/OrchestrationMessageEnd"
+        },
+        {
+          "$ref": "#/$defs/OrchestrationEnd"
+        },
+        {
+          "$ref": "#/$defs/OrchestrationError"
+        },
+        {
+          "$ref": "#/$defs/OrchestrationRoute"
+        },
+        {
+          "$ref": "#/$defs/OrchestrationApprovalRequired"
+        }
+      ],
+      "title": "Event"
+    }
+  },
+  "required": [
+    "request",
+    "response",
+    "event"
+  ],
+  "title": "Contract",
+  "type": "object"
+}

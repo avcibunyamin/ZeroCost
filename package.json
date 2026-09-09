@@ -1,0 +1,38 @@
+{
+  "name": "zerocost",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run schema:check && tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "desktop": "node scripts/desktop.mjs dev",
+    "desktop:build": "node scripts/desktop.mjs build",
+    "schema:generate": "node scripts/generate-contract.mjs",
+    "schema:check": "node scripts/generate-contract.mjs --check",
+    "test:backend": "node scripts/python.mjs -m pytest backend/tests -q",
+    "check": "npm run schema:check && tsc --noEmit && npm run test:backend && npm run test:contract",
+    "test:contract": "node --test scripts/test-contract.mjs",
+    "predev": "npm run schema:check"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "lucide-react": "^0.468.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^6.0.2",
+    "ajv": "^8.17.1",
+    "esbuild": "^0.28.2",
+    "json-schema-to-typescript": "^15.0.0",
+    "prettier": "^3.9.6",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.16"
+  }
+}

@@ -1,0 +1,150 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import validate from "../src/generated/validate-response.js";
+import validateEvent from "../src/generated/validate-event.js";
+test("vault response exposes presence only", () => {
+  const response = {
+    protocol_version: 1,
+    request_id: "vault",
+    ok: true,
+    result: { connection_id: "one", has_key: true },
+  };
+  assert.equal(validate(response), true);
+  assert.equal(
+    validate({
+      ...response,
+      result: { ...response.result, secret: "forbidden" },
+    }),
+    false,
+  );
+});
+test("orchestration and workspace responses are closed", () => {
+  const history = {
+    protocol_version: 1,
+    request_id: "team",
+    ok: true,
+    result: {
+      runs: [{
+        run_id: "run", objective: "decide", agent_ids: ["a", "b"], rounds: 1,
+        routing_mode: "manual", route_reason: "Manuel sıra korundu.",
+        max_model_calls: 5, max_output_tokens: 512, used_model_calls: 3,
+        workspace_id: null, context_paths: [],
+        status: "completed", error: "", messages: [
+          { sequence: 1, agent_id: "a", phase: "analysis", content: "view" },
+        ],
+      }],
+    },
+  };
+  assert.equal(validate(history), true);
+  assert.equal(validate({ ...history, result: { ...history.result, secret: "forbidden" } }), false);
+  const file = { protocol_version: 1, request_id: "read", ok: true,
+    result: { workspace_id: "w", path: "README.md", content: "text", size: 4 } };
+  assert.equal(validate(file), true);
+});
+
+test("orchestration stream attributes every chunk", () => {
+  const chunk = { protocol_version: 1, type: "orchestration_chunk", run_id: "run",
+    sequence: 1, agent_id: "a", phase: "analysis", token: "x", is_final: false };
+  assert.equal(validateEvent(chunk), true);
+  const { agent_id: _removed, ...invalid } = chunk;
+  assert.equal(validateEvent(invalid), false);
+  assert.equal(validateEvent({ protocol_version: 1, type: "orchestration_end", run_id: "run",
+    sequence: 2, status: "completed", is_final: true }), true);
+  assert.equal(validateEvent({ protocol_version: 1, type: "orchestration_approval_required",
+    run_id: "run", sequence: 2, permission: "workspace.read", workspace_id: "w",
+    paths: ["README.md"], is_final: false }), true);
+});
+const valid = {
+  protocol_version: 1,
+  request_id: "test",
+  ok: true,
+  result: {
+    app_version: "0.1.0",
+    protocol_version: 1,
+    database_version: 1,
+    connections: [],
+    agents: [],
+    workspaces: [],
+  },
+};
+test("generated validator accepts complete responses", () =>
+  assert.equal(validate(valid), true));
+test("generated validator rejects missing discriminant and incorrect payloads", () => {
+  const { ok, ...missing } = valid;
+  assert.equal(validate(missing), false);
+  assert.equal(validate({ ...valid, protocol_version: 2 }), false);
+  assert.equal(
+    validate({ ...valid, result: { ...valid.result, agents: "invalid" } }),
+    false,
+  );
+  assert.equal(validate({ ...valid, secret: "must not be reflected" }), false);
+});
+test("error response is structured and closed", () => {
+  assert.equal(
+    validate({
+      protocol_version: 1,
+      request_id: "test",
+      ok: false,
+      code: "invalid_request",
+      message: "Bad request",
+    }),
+    true,
+  );
+  assert.equal(
+    validate({
+      protocol_version: 1,
+      request_id: "test",
+      ok: false,
+      code: "unknown",
+      message: "Bad request",
+    }),
+    false,
+  );
+});
+test("stream envelopes enforce sequence and terminal fields", () => {
+  assert.equal(
+    validateEvent({
+      protocol_version: 1,
+      type: "stream_chunk",
+      run_id: "r",
+      sequence: 1,
+      token: "mer",
+      is_final: false,
+    }),
+    true,
+  );
+  assert.equal(
+    validateEvent({
+      protocol_version: 1,
+      type: "stream_end",
+      run_id: "r",
+      sequence: 2,
+      full_content: "mer",
+      status: "completed",
+      is_final: true,
+    }),
+    true,
+  );
+  assert.equal(
+    validateEvent({
+      protocol_version: 1,
+      type: "stream_chunk",
+      run_id: "r",
+      sequence: 1,
+      token: "mer",
+      is_final: true,
+    }),
+    false,
+  );
+  assert.equal(
+    validateEvent({
+      protocol_version: 1,
+      type: "stream_end",
+      run_id: "r",
+      sequence: 2,
+      token: "wrong",
+      is_final: true,
+    }),
+    false,
+  );
+});

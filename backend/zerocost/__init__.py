@@ -1,0 +1,1 @@
+"""ZeroCost local application core."""
