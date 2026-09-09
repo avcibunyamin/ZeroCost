@@ -221,6 +221,61 @@ a {
   margin-left: auto;
   color: #939c96;
 }
+.knowledge-page {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+.knowledge-refresh {
+  border: 1px solid #dfe7e2;
+  background: #fff;
+}
+.knowledge-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(420px, 1.4fr);
+  gap: 18px;
+}
+.knowledge-create form {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+}
+.knowledge-create label {
+  display: grid;
+  gap: 7px;
+  color: #66736c;
+  font-size: 11px;
+  font-weight: 600;
+}
+.knowledge-create input,
+.knowledge-create select {
+  width: 100%;
+  border: 1px solid #dfe6e2;
+  border-radius: 7px;
+  background: #fff;
+  padding: 11px 12px;
+  color: #34413a;
+}
+.knowledge-create .button { justify-content: center; margin-top: 2px; }
+.knowledge-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 14px;
+  align-items: center;
+  padding: 15px 0;
+  border-top: 1px solid #edf1ee;
+}
+.knowledge-card > div:nth-child(2) strong,
+.knowledge-card > div:nth-child(2) span { display: block; }
+.knowledge-card > div:nth-child(2) span { color: #8a958f; font-size: 11px; margin-top: 5px; }
+.knowledge-counts { min-width: 48px; text-align: center; }
+.knowledge-counts strong,
+.knowledge-counts span { display: block; }
+.knowledge-counts strong { font-size: 18px; color: #395348; }
+.knowledge-counts span { font-size: 9px; color: #96a09a; text-transform: uppercase; margin-top: 3px; }
+.knowledge-empty { min-height: 210px; }
+@media (max-width: 900px) {
+  .knowledge-grid { grid-template-columns: 1fr; }
+}
 .main-shell {
   margin-left: 236px;
   flex: 1;

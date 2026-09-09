@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import sqlite3
+import struct
 from uuid import uuid4
 from .models import Agent, AgentInput, Connection, ConnectionInput, Snapshot, Workspace, WorkspaceInput
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 class Store:
@@ -160,6 +161,42 @@ class Store:
                 COMMIT;
             """)
 
+        if current < 8:
+            self.db.executescript("""
+                BEGIN IMMEDIATE;
+                CREATE TABLE knowledge_collections (
+                    id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+                    embedding_provider TEXT NOT NULL CHECK(embedding_provider IN ('ollama')),
+                    embedding_model TEXT NOT NULL,
+                    dimensions INTEGER NOT NULL CHECK(dimensions BETWEEN 1 AND 8192),
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE knowledge_sources (
+                    id TEXT PRIMARY KEY,
+                    collection_id TEXT NOT NULL REFERENCES knowledge_collections(id) ON DELETE CASCADE,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    path TEXT NOT NULL, content_hash TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('ready','failed')),
+                    error TEXT NOT NULL DEFAULT '', indexed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(collection_id, workspace_id, path)
+                );
+                CREATE TABLE knowledge_chunks (
+                    id TEXT PRIMARY KEY,
+                    source_id TEXT NOT NULL REFERENCES knowledge_sources(id) ON DELETE CASCADE,
+                    ordinal INTEGER NOT NULL, start_line INTEGER NOT NULL, end_line INTEGER NOT NULL,
+                    content TEXT NOT NULL, embedding BLOB NOT NULL,
+                    UNIQUE(source_id, ordinal)
+                );
+                CREATE INDEX knowledge_sources_collection ON knowledge_sources(collection_id);
+                CREATE INDEX knowledge_chunks_source ON knowledge_chunks(source_id);
+                CREATE VIRTUAL TABLE knowledge_chunks_fts USING fts5(
+                    chunk_id UNINDEXED, collection_id UNINDEXED, source_path UNINDEXED,
+                    content, tokenize='unicode61 remove_diacritics 2'
+                );
+                PRAGMA user_version=8;
+                COMMIT;
+            """)
+
     def close(self):
         self.db.close()
 
@@ -206,6 +243,69 @@ class Store:
 
     def workspace(self, workspace_id: str) -> Workspace | None:
         return next((workspace for workspace in self.snapshot().workspaces if workspace.id == workspace_id), None)
+
+    def create_knowledge_collection(self, value, dimensions: int):
+        identifier = str(uuid4())
+        with self.db:
+            self.db.execute("""INSERT INTO knowledge_collections
+                (id,name,embedding_provider,embedding_model,dimensions) VALUES (?,?,?,?,?)""",
+                (identifier, value.name, value.embedding_provider, value.embedding_model, dimensions))
+        return identifier
+
+    def knowledge_snapshot(self, embedding_models=None):
+        from .models import EmbeddingModel, KnowledgeCollection, KnowledgeSnapshot
+        collections = []
+        for row in self.db.execute("""SELECT c.id,c.name,c.embedding_provider,
+                c.embedding_model,c.dimensions,
+                COUNT(DISTINCT s.id) AS source_count, COUNT(k.id) AS chunk_count
+            FROM knowledge_collections c
+            LEFT JOIN knowledge_sources s ON s.collection_id=c.id
+            LEFT JOIN knowledge_chunks k ON k.source_id=s.id
+            GROUP BY c.id ORDER BY c.created_at,c.rowid"""):
+            collections.append(KnowledgeCollection(**dict(row)))
+        return KnowledgeSnapshot(collections=collections,
+            embedding_models=[EmbeddingModel(**item) for item in (embedding_models or [])])
+
+    def replace_knowledge_source(self, collection_id: str, workspace_id: str, path: str,
+                                 content_hash: str, chunks: list[dict]):
+        collection = self.db.execute("SELECT dimensions FROM knowledge_collections WHERE id=?",
+                                     (collection_id,)).fetchone()
+        if collection is None or self.workspace(workspace_id) is None:
+            raise ValueError('Bilgi koleksiyonu veya çalışma alanı bulunamadı.')
+        dimensions = collection['dimensions']
+        source_id = str(uuid4())
+        prepared = []
+        for ordinal, chunk in enumerate(chunks):
+            vector = chunk['embedding']
+            if len(vector) != dimensions:
+                raise ValueError('Embedding boyutu koleksiyonla uyuşmuyor.')
+            prepared.append((str(uuid4()), source_id, ordinal, int(chunk['start_line']),
+                             int(chunk['end_line']), chunk['content'],
+                             struct.pack(f'<{dimensions}f', *vector)))
+        with self.db:
+            old = self.db.execute("""SELECT id FROM knowledge_sources
+                WHERE collection_id=? AND workspace_id=? AND path=?""",
+                (collection_id, workspace_id, path)).fetchone()
+            if old:
+                chunk_ids = [row[0] for row in self.db.execute(
+                    "SELECT id FROM knowledge_chunks WHERE source_id=?", (old['id'],))]
+                self.db.executemany("DELETE FROM knowledge_chunks_fts WHERE chunk_id=?",
+                                    [(identifier,) for identifier in chunk_ids])
+                self.db.execute("DELETE FROM knowledge_sources WHERE id=?", (old['id'],))
+            self.db.execute("""INSERT INTO knowledge_sources
+                (id,collection_id,workspace_id,path,content_hash,status) VALUES (?,?,?,?,?,'ready')""",
+                (source_id, collection_id, workspace_id, path, content_hash))
+            self.db.executemany("INSERT INTO knowledge_chunks VALUES (?,?,?,?,?,?,?)", prepared)
+            self.db.executemany("""INSERT INTO knowledge_chunks_fts
+                (chunk_id,collection_id,source_path,content) VALUES (?,?,?,?)""",
+                [(item[0], collection_id, path, item[5]) for item in prepared])
+        return source_id
+
+    def search_knowledge_fts(self, collection_id: str, query: str, limit: int = 10):
+        return [dict(row) for row in self.db.execute("""SELECT chunk_id,source_path,content,
+                bm25(knowledge_chunks_fts) AS score FROM knowledge_chunks_fts
+            WHERE knowledge_chunks_fts MATCH ? AND collection_id=? ORDER BY score LIMIT ?""",
+            (query, collection_id, min(max(limit, 1), 20)))]
 
     def history(self, agent_id: str):
         from .models import ChatHistory, ChatTurn

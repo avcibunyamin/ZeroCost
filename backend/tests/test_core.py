@@ -6,7 +6,8 @@ import subprocess
 import sys
 import pytest
 import asyncio
-from zerocost.models import AgentInput, ConnectionInput, WorkspaceInput
+from zerocost.models import (AgentInput, ConnectionInput, WorkspaceInput,
+                             KnowledgeCollectionInput)
 from zerocost.sidecar import ChatService, dispatch
 from zerocost.storage import Store
 from zerocost.providers.base import Message, ProviderError
@@ -167,17 +168,81 @@ def test_v4_orchestration_migrates_with_budget_defaults(tmp_path):
         SELECT run_id,objective,rounds,status,error,created_at FROM orchestration_runs_v5_backup""")
     store.db.execute('DROP TABLE orchestration_runs_v5_backup')
     store.db.execute('CREATE INDEX orchestration_created ON orchestration_runs(created_at)')
+    store.db.execute('DROP TABLE knowledge_chunks_fts')
+    store.db.execute('DROP TABLE knowledge_chunks')
+    store.db.execute('DROP TABLE knowledge_sources')
+    store.db.execute('DROP TABLE knowledge_collections')
     store.db.execute('PRAGMA user_version=4')
     store.db.commit()
     store.close()
 
     migrated = Store(path)
     run = migrated.orchestration_history().runs[0]
-    assert migrated.snapshot().database_version == 7
+    assert migrated.snapshot().database_version == 8
     assert run.routing_mode == 'manual' and run.max_model_calls == 5
     assert run.agent_ids == [a.id for a in agents]
     assert migrated.db.execute('PRAGMA foreign_key_check').fetchall() == []
     migrated.close()
+
+
+def test_knowledge_storage_is_replaceable_searchable_and_dimension_safe(tmp_path):
+    root = tmp_path / 'project'
+    root.mkdir()
+    store = Store(tmp_path / 'knowledge.sqlite3')
+    store.create_workspace(WorkspaceInput(name='Project', path=str(root)))
+    workspace = store.snapshot().workspaces[0]
+    collection_id = store.create_knowledge_collection(KnowledgeCollectionInput(
+        name='Belgeler', embedding_model='nomic-embed-text:latest'), 3)
+    store.replace_knowledge_source(collection_id, workspace.id, 'notes.md', 'hash-1', [
+        {'start_line': 1, 'end_line': 2, 'content': 'Python güvenli dosya işlemleri',
+         'embedding': [1.0, 0.0, 0.0]},
+        {'start_line': 3, 'end_line': 4, 'content': 'Rust masaüstü köprüsü',
+         'embedding': [0.0, 1.0, 0.0]},
+    ])
+    snapshot = store.knowledge_snapshot()
+    assert (snapshot.collections[0].source_count, snapshot.collections[0].chunk_count) == (1, 2)
+    assert store.search_knowledge_fts(collection_id, 'Python')[0]['source_path'] == 'notes.md'
+    store.replace_knowledge_source(collection_id, workspace.id, 'notes.md', 'hash-2', [
+        {'start_line': 1, 'end_line': 1, 'content': 'Güncel Python notları',
+         'embedding': [0.5, 0.5, 0.0]},
+    ])
+    snapshot = store.knowledge_snapshot()
+    assert (snapshot.collections[0].source_count, snapshot.collections[0].chunk_count) == (1, 1)
+    with pytest.raises(ValueError, match='boyutu'):
+        store.replace_knowledge_source(collection_id, workspace.id, 'bad.md', 'hash', [
+            {'start_line': 1, 'end_line': 1, 'content': 'bad', 'embedding': [1.0, 0.0]},
+        ])
+    assert store.db.execute('PRAGMA foreign_key_check').fetchall() == []
+    store.close()
+
+
+def test_knowledge_collection_ipc_probes_embedding_dimensions(tmp_path):
+    class FakeEmbeddings:
+        def __init__(self, model=''):
+            self.model = model
+
+        async def list_models(self):
+            return [{'name': 'embed-local', 'size': 42}]
+
+        async def embed(self, texts):
+            assert self.model == 'embed-local'
+            assert len(texts) == 1
+            return [[0.0, 0.6, 0.8]]
+
+    async def scenario():
+        store = Store(tmp_path / 'ipc-knowledge.sqlite3')
+        service = ChatService(store, embedding_factory=FakeEmbeddings)
+        response = await service.handle(request('knowledge.collection.create',
+            name='Projeler', embedding_provider='ollama', embedding_model='embed-local'))
+        assert response.ok
+        collection = response.result.collections[0]
+        assert collection.dimensions == 3 and collection.embedding_model == 'embed-local'
+        snapshot = await service.handle(request('knowledge.snapshot'))
+        assert snapshot.result.embedding_models[0].name == 'embed-local'
+        await service.close()
+        store.close()
+
+    asyncio.run(scenario())
 
 
 def test_atomic_workspace_write_rechecks_hash_and_rejects_symlink(tmp_path):

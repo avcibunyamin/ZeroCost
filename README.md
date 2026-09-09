@@ -35,8 +35,9 @@ Windows'ta Python komutu `.venv\Scripts\python.exe` olur. Node yardımcı betikl
 - Ajan/aşama kimlikli canlı görev olayları, SQLite görev geçmişi ve LangGraph SQLite checkpoint'leri.
 - Ajan bazında `workspace.read` izni; sınırlandırılmış klasör listeleme ve UTF-8 metin okuma araçları.
 - Kullanıcının seçtiği en fazla 10 çalışma alanı dosyasını çoklu ajan bağlamına ekleme.
+- Yerel Ollama embedding modeli keşfi, bilgi koleksiyonları ve SQLite FTS5/float32 vektör depolama temeli.
 
-Claude ve Gemini akışlı sohbet adaptörleri ve Rust yönetiminde OS anahtar kasası eklendi. Faz 2'nin çoklu ajan, otomatik router, yürütme bütçesi, kontrollü çalışma alanı yazması ve terminal dilimi çalışır. Vektör RAG henüz uygulanmadı; bu sürüm üretime hazır değildir.
+Claude ve Gemini akışlı sohbet adaptörleri ve Rust yönetiminde OS anahtar kasası eklendi. Faz 2'nin çoklu ajan, otomatik router, yürütme bütçesi, kontrollü çalışma alanı yazması ve terminal dilimi çalışır. RAG'ın veri ve embedding temeli hazırdır; belge işleme ve ajan arama aracı henüz uygulanmadı. Bu sürüm üretime hazır değildir.
 
 ## Bulut bağlantısı ve anahtar kasası
 
@@ -70,6 +71,14 @@ Terminal shell kullanmaz; komut argv dizisi olarak çalıştırılır. Çalışm
 
 Entegrasyon referansları: [keyring](https://docs.rs/keyring/3.6.3/keyring/), [Anthropic Python SDK](https://github.com/anthropics/anthropic-sdk-python), [Google GenAI SDK](https://googleapis.github.io/python-genai/).
 
+## Faz 3: yerel bilgi ve embedding temeli
+
+**Bilgi yönetimi** ekranı Ollama'nın embedding yeteneği bildiren kurulu modellerini keşfeder. Koleksiyon oluşturulurken `/api/embed` ile yerel bir boyut probu yapılır; dönen vektör doğrulanır, L2 normalize edilir ve koleksiyonun model/boyut sözleşmesi SQLite'a kaydedilir. Ollama erişilemez olsa da önceden kaydedilmiş koleksiyonlar görüntülenir. API anahtarı veya ücretli bulut çağrısı kullanılmaz.
+
+SQLite şema v8; koleksiyon, kaynak ve parça tablolarını, Unicode FTS5 tam metin indeksini ve küçük endian float32 embedding BLOB'larını içerir. Kaynak yenileme aynı koleksiyon/workspace/yol anahtarında transaction içinde eskisini değiştirir; vektör boyutu uyuşmazlığı reddedilir. Bu taşınabilir temel harici bir vektör veritabanı gerektirmez. Belge chunking, kaynak ekleme UI'si, hibrit sıralama ve ajan `knowledge.search` aracı sonraki dilimin kapsamındadır.
+
+Embedding API sözleşmesi: [Ollama Embeddings](https://docs.ollama.com/capabilities/embeddings) ve [Ollama `/api/embed`](https://docs.ollama.com/api/embed).
+
 ## Pydantic → TypeScript sözleşmesi
 
 Tek kaynak `backend/zerocost/models.py` dosyasıdır.
@@ -83,7 +92,7 @@ npm run schema:check
 
 Çoklu ajan görevleri manuel veya deterministik otomatik routing kullanır. Router kararı ve gerekçesi görev kaydında tutulur. Çağrı bütçesi, görev başlamadan önce gerekli model çağrılarını sınırlar; çıktı bütçesi her sağlayıcı isteğine doğrudan uygulanır. Çalışma alanı dosyaları seçildiyse LangGraph görevi `waiting_approval` checkpoint'inde durur. İçerik ancak kullanıcı somut dosya listesini onayladıktan sonra okunur; ret halinde hiçbir model çağrısı yapılmaz.
 
-Protokol v1 yapılandırma komutlarına ek olarak sohbet, kasa, workspace okuma, `pricing.catalog` ve `orchestration.start/approve/cancel/history` komutlarını sunar. Her komut `request_id` ve `protocol_version` içerir. Akış parçaları `run_id`, monoton `sequence`, olay türü, ajan/aşama kimliği ve terminal işareti taşır. Yanıtlar ile akış olayları Pydantic'ten üretilen ayrı çalışma zamanı doğrulayıcılarından geçer.
+Protokol v1 yapılandırma komutlarına ek olarak sohbet, kasa, workspace okuma, `pricing.catalog`, `knowledge.snapshot`, `knowledge.collection.create` ve `orchestration.start/approve/cancel/history` komutlarını sunar. Her komut `request_id` ve `protocol_version` içerir. Akış parçaları `run_id`, monoton `sequence`, olay türü, ajan/aşama kimliği ve terminal işareti taşır. Yanıtlar ile akış olayları Pydantic'ten üretilen ayrı çalışma zamanı doğrulayıcılarından geçer.
 
 ## Veri ve süreç yaşam döngüsü
 
@@ -118,7 +127,8 @@ macOS uygulaması `src-tauri/target/release/bundle/macos/ZeroCost.app` altında 
 
 ## Sonraki geliştirme dilimi
 
-1. RAG dizini, kaynak alıntıları ve bilgi koleksiyonları.
-2. Skill paket manifesti, sürümleme ve izin beyanları.
-3. Kesilmiş üretim düğümünü kontrollü yeniden deneme ve kısmi görev devamı.
-4. Sağlayıcı cache/batch tarifeleri ve kullanıcıya özel fiyat profilleri.
+1. Belge chunking hattı, kaynak ekleme arayüzü ve içerik özetiyle idempotent yeniden indeksleme.
+2. Hibrit FTS/vektör sıralaması, kaynak alıntıları ve ajan `knowledge.search` aracı.
+3. Skill paket manifesti, sürümleme ve izin beyanları.
+4. Kesilmiş üretim düğümünü kontrollü yeniden deneme ve kısmi görev devamı.
+5. Sağlayıcı cache/batch tarifeleri ve kullanıcıya özel fiyat profilleri.

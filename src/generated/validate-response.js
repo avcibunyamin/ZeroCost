@@ -36,7 +36,7 @@ var require_ucs2length = __commonJS({
 // validate-response.js
 var validate = validate10;
 var validate_response_default = validate10;
-var schema32 = { "additionalProperties": false, "properties": { "protocol_version": { "const": 1, "default": 1, "title": "Protocol Version", "type": "integer" }, "request_id": { "title": "Request Id", "type": "string" }, "ok": { "const": false, "default": false, "title": "Ok", "type": "boolean" }, "code": { "enum": ["invalid_request", "conflict", "not_found", "internal_error"], "title": "Code", "type": "string" }, "message": { "title": "Message", "type": "string" } }, "required": ["protocol_version", "request_id", "ok", "code", "message"], "title": "Failure", "type": "object" };
+var schema35 = { "additionalProperties": false, "properties": { "protocol_version": { "const": 1, "default": 1, "title": "Protocol Version", "type": "integer" }, "request_id": { "title": "Request Id", "type": "string" }, "ok": { "const": false, "default": false, "title": "Ok", "type": "boolean" }, "code": { "enum": ["invalid_request", "conflict", "not_found", "internal_error"], "title": "Code", "type": "string" }, "message": { "title": "Message", "type": "string" } }, "required": ["protocol_version", "request_id", "ok", "code", "message"], "title": "Failure", "type": "object" };
 var schema14 = { "additionalProperties": false, "properties": { "name": { "maxLength": 100, "minLength": 1, "title": "Name", "type": "string" }, "provider": { "enum": ["ollama", "lmstudio", "anthropic", "gemini", "openai"], "title": "Provider", "type": "string" }, "model_id": { "maxLength": 100, "minLength": 1, "title": "Model Id", "type": "string" }, "id": { "title": "Id", "type": "string" }, "status": { "const": "unconfigured", "default": "unconfigured", "title": "Status", "type": "string" } }, "required": ["name", "provider", "model_id", "id", "status"], "title": "Connection", "type": "object" };
 var schema15 = { "additionalProperties": false, "properties": { "name": { "maxLength": 100, "minLength": 1, "title": "Name", "type": "string" }, "role": { "maxLength": 100, "minLength": 1, "title": "Role", "type": "string" }, "connection_id": { "maxLength": 128, "minLength": 1, "title": "Connection Id", "type": "string" }, "instructions": { "default": "", "maxLength": 8e3, "title": "Instructions", "type": "string" }, "id": { "title": "Id", "type": "string" }, "permissions": { "items": { "enum": ["workspace.read", "workspace.write", "terminal.execute"], "type": "string" }, "title": "Permissions", "type": "array" } }, "required": ["name", "role", "connection_id", "instructions", "id", "permissions"], "title": "Agent", "type": "object" };
 var func2 = require_ucs2length().default;
@@ -1974,6 +1974,284 @@ function validate24(data, { instancePath = "", parentData, parentDataProperty, r
   validate24.errors = vErrors;
   return errors === 0;
 }
+function validate26(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  if (errors === 0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.collections === void 0 && (missing0 = "collections") || data.embedding_models === void 0 && (missing0 = "embedding_models") || data.embedding_error === void 0 && (missing0 = "embedding_error")) {
+        validate26.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs1 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "collections" || key0 === "embedding_models" || key0 === "embedding_error")) {
+            validate26.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs1 === errors) {
+          if (data.collections !== void 0) {
+            let data0 = data.collections;
+            const _errs2 = errors;
+            if (errors === _errs2) {
+              if (Array.isArray(data0)) {
+                var valid1 = true;
+                const len0 = data0.length;
+                for (let i0 = 0; i0 < len0; i0++) {
+                  let data1 = data0[i0];
+                  const _errs4 = errors;
+                  const _errs5 = errors;
+                  if (errors === _errs5) {
+                    if (data1 && typeof data1 == "object" && !Array.isArray(data1)) {
+                      let missing1;
+                      if (data1.name === void 0 && (missing1 = "name") || data1.embedding_provider === void 0 && (missing1 = "embedding_provider") || data1.embedding_model === void 0 && (missing1 = "embedding_model") || data1.id === void 0 && (missing1 = "id") || data1.dimensions === void 0 && (missing1 = "dimensions") || data1.source_count === void 0 && (missing1 = "source_count") || data1.chunk_count === void 0 && (missing1 = "chunk_count")) {
+                        validate26.errors = [{ instancePath: instancePath + "/collections/" + i0, schemaPath: "#/$defs/KnowledgeCollection/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                        return false;
+                      } else {
+                        const _errs7 = errors;
+                        for (const key1 in data1) {
+                          if (!(key1 === "name" || key1 === "embedding_provider" || key1 === "embedding_model" || key1 === "id" || key1 === "dimensions" || key1 === "source_count" || key1 === "chunk_count")) {
+                            validate26.errors = [{ instancePath: instancePath + "/collections/" + i0, schemaPath: "#/$defs/KnowledgeCollection/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
+                            return false;
+                            break;
+                          }
+                        }
+                        if (_errs7 === errors) {
+                          if (data1.name !== void 0) {
+                            let data2 = data1.name;
+                            const _errs8 = errors;
+                            if (errors === _errs8) {
+                              if (typeof data2 === "string") {
+                                if (func2(data2) > 100) {
+                                  validate26.errors = [{ instancePath: instancePath + "/collections/" + i0 + "/name", schemaPath: "#/$defs/KnowledgeCollection/properties/name/maxLength", keyword: "maxLength", params: { limit: 100 }, message: "must NOT have more than 100 characters" }];
+                                  return false;
+                                } else {
+                                  if (func2(data2) < 1) {
+                                    validate26.errors = [{ instancePath: instancePath + "/collections/" + i0 + "/name", schemaPath: "#/$defs/KnowledgeCollection/properties/name/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                                    return false;
+                                  }
+                                }
+                              } else {
+                                validate26.errors = [{ instancePath: instancePath + "/collections/" + i0 + "/name", schemaPath: "#/$defs/KnowledgeCollection/properties/name/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                return false;
+                              }
+                            }
+                            var valid3 = _errs8 === errors;
+                          } else {
+                            var valid3 = true;
+                          }
+                          if (valid3) {
+                            if (data1.embedding_provider !== void 0) {
+                              let data3 = data1.embedding_provider;
+                              const _errs10 = errors;
+                              if (typeof data3 !== "string") {
+                                validate26.errors = [{ instancePath: instancePath + "/collections/" + i0 + "/embedding_provider", schemaPath: "#/$defs/KnowledgeCollection/properties/embedding_provider/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                return false;
+                              }
+                              if ("ollama" !== data3) {
+                                validate26.errors = [{ instancePath: instancePath + "/collections/" + i0 + "/embedding_provider", schemaPath: "#/$defs/KnowledgeCollection/properties/embedding_provider/const", keyword: "const", params: { allowedValue: "ollama" }, message: "must be equal to constant" }];
+                                return false;
+                              }
+                              var valid3 = _errs10 === errors;
+                            } else {
+                              var valid3 = true;
+                            }
+                            if (valid3) {
+                              if (data1.embedding_model !== void 0) {
+                                let data4 = data1.embedding_model;
+                                const _errs12 = errors;
+                                if (errors === _errs12) {
+                                  if (typeof data4 === "string") {
+                                    if (func2(data4) > 100) {
+                                      validate26.errors = [{ instancePath: instancePath + "/collections/" + i0 + "/embedding_model", schemaPath: "#/$defs/KnowledgeCollection/properties/embedding_model/maxLength", keyword: "maxLength", params: { limit: 100 }, message: "must NOT have more than 100 characters" }];
+                                      return false;
+                                    } else {
+                                      if (func2(data4) < 1) {
+                                        validate26.errors = [{ instancePath: instancePath + "/collections/" + i0 + "/embedding_model", schemaPath: "#/$defs/KnowledgeCollection/properties/embedding_model/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                                        return false;
+                                      }
+                                    }
+                                  } else {
+                                    validate26.errors = [{ instancePath: instancePath + "/collections/" + i0 + "/embedding_model", schemaPath: "#/$defs/KnowledgeCollection/properties/embedding_model/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                    return false;
+                                  }
+                                }
+                                var valid3 = _errs12 === errors;
+                              } else {
+                                var valid3 = true;
+                              }
+                              if (valid3) {
+                                if (data1.id !== void 0) {
+                                  const _errs14 = errors;
+                                  if (typeof data1.id !== "string") {
+                                    validate26.errors = [{ instancePath: instancePath + "/collections/" + i0 + "/id", schemaPath: "#/$defs/KnowledgeCollection/properties/id/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                    return false;
+                                  }
+                                  var valid3 = _errs14 === errors;
+                                } else {
+                                  var valid3 = true;
+                                }
+                                if (valid3) {
+                                  if (data1.dimensions !== void 0) {
+                                    let data6 = data1.dimensions;
+                                    const _errs16 = errors;
+                                    if (!(typeof data6 == "number" && (!(data6 % 1) && !isNaN(data6)))) {
+                                      validate26.errors = [{ instancePath: instancePath + "/collections/" + i0 + "/dimensions", schemaPath: "#/$defs/KnowledgeCollection/properties/dimensions/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                                      return false;
+                                    }
+                                    var valid3 = _errs16 === errors;
+                                  } else {
+                                    var valid3 = true;
+                                  }
+                                  if (valid3) {
+                                    if (data1.source_count !== void 0) {
+                                      let data7 = data1.source_count;
+                                      const _errs18 = errors;
+                                      if (!(typeof data7 == "number" && (!(data7 % 1) && !isNaN(data7)))) {
+                                        validate26.errors = [{ instancePath: instancePath + "/collections/" + i0 + "/source_count", schemaPath: "#/$defs/KnowledgeCollection/properties/source_count/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                                        return false;
+                                      }
+                                      var valid3 = _errs18 === errors;
+                                    } else {
+                                      var valid3 = true;
+                                    }
+                                    if (valid3) {
+                                      if (data1.chunk_count !== void 0) {
+                                        let data8 = data1.chunk_count;
+                                        const _errs20 = errors;
+                                        if (!(typeof data8 == "number" && (!(data8 % 1) && !isNaN(data8)))) {
+                                          validate26.errors = [{ instancePath: instancePath + "/collections/" + i0 + "/chunk_count", schemaPath: "#/$defs/KnowledgeCollection/properties/chunk_count/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                                          return false;
+                                        }
+                                        var valid3 = _errs20 === errors;
+                                      } else {
+                                        var valid3 = true;
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    } else {
+                      validate26.errors = [{ instancePath: instancePath + "/collections/" + i0, schemaPath: "#/$defs/KnowledgeCollection/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                      return false;
+                    }
+                  }
+                  var valid1 = _errs4 === errors;
+                  if (!valid1) {
+                    break;
+                  }
+                }
+              } else {
+                validate26.errors = [{ instancePath: instancePath + "/collections", schemaPath: "#/properties/collections/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                return false;
+              }
+            }
+            var valid0 = _errs2 === errors;
+          } else {
+            var valid0 = true;
+          }
+          if (valid0) {
+            if (data.embedding_models !== void 0) {
+              let data9 = data.embedding_models;
+              const _errs22 = errors;
+              if (errors === _errs22) {
+                if (Array.isArray(data9)) {
+                  var valid4 = true;
+                  const len1 = data9.length;
+                  for (let i1 = 0; i1 < len1; i1++) {
+                    let data10 = data9[i1];
+                    const _errs24 = errors;
+                    const _errs25 = errors;
+                    if (errors === _errs25) {
+                      if (data10 && typeof data10 == "object" && !Array.isArray(data10)) {
+                        let missing2;
+                        if (data10.name === void 0 && (missing2 = "name") || data10.size === void 0 && (missing2 = "size")) {
+                          validate26.errors = [{ instancePath: instancePath + "/embedding_models/" + i1, schemaPath: "#/$defs/EmbeddingModel/required", keyword: "required", params: { missingProperty: missing2 }, message: "must have required property '" + missing2 + "'" }];
+                          return false;
+                        } else {
+                          const _errs27 = errors;
+                          for (const key2 in data10) {
+                            if (!(key2 === "name" || key2 === "size")) {
+                              validate26.errors = [{ instancePath: instancePath + "/embedding_models/" + i1, schemaPath: "#/$defs/EmbeddingModel/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key2 }, message: "must NOT have additional properties" }];
+                              return false;
+                              break;
+                            }
+                          }
+                          if (_errs27 === errors) {
+                            if (data10.name !== void 0) {
+                              const _errs28 = errors;
+                              if (typeof data10.name !== "string") {
+                                validate26.errors = [{ instancePath: instancePath + "/embedding_models/" + i1 + "/name", schemaPath: "#/$defs/EmbeddingModel/properties/name/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                return false;
+                              }
+                              var valid6 = _errs28 === errors;
+                            } else {
+                              var valid6 = true;
+                            }
+                            if (valid6) {
+                              if (data10.size !== void 0) {
+                                let data12 = data10.size;
+                                const _errs30 = errors;
+                                if (!(typeof data12 == "number" && (!(data12 % 1) && !isNaN(data12)))) {
+                                  validate26.errors = [{ instancePath: instancePath + "/embedding_models/" + i1 + "/size", schemaPath: "#/$defs/EmbeddingModel/properties/size/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                                  return false;
+                                }
+                                var valid6 = _errs30 === errors;
+                              } else {
+                                var valid6 = true;
+                              }
+                            }
+                          }
+                        }
+                      } else {
+                        validate26.errors = [{ instancePath: instancePath + "/embedding_models/" + i1, schemaPath: "#/$defs/EmbeddingModel/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                        return false;
+                      }
+                    }
+                    var valid4 = _errs24 === errors;
+                    if (!valid4) {
+                      break;
+                    }
+                  }
+                } else {
+                  validate26.errors = [{ instancePath: instancePath + "/embedding_models", schemaPath: "#/properties/embedding_models/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                  return false;
+                }
+              }
+              var valid0 = _errs22 === errors;
+            } else {
+              var valid0 = true;
+            }
+            if (valid0) {
+              if (data.embedding_error !== void 0) {
+                const _errs32 = errors;
+                if (typeof data.embedding_error !== "string") {
+                  validate26.errors = [{ instancePath: instancePath + "/embedding_error", schemaPath: "#/properties/embedding_error/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                  return false;
+                }
+                var valid0 = _errs32 === errors;
+              } else {
+                var valid0 = true;
+              }
+            }
+          }
+        }
+      }
+    } else {
+      validate26.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate26.errors = vErrors;
+  return errors === 0;
+}
 function validate11(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -2327,6 +2605,15 @@ function validate11(data, { instancePath = "", parentData, parentDataProperty, r
                                   }
                                   var _valid0 = _errs41 === errors;
                                   valid1 = valid1 || _valid0;
+                                  if (!valid1) {
+                                    const _errs42 = errors;
+                                    if (!validate26(data3, { instancePath: instancePath + "/result", parentData: data, parentDataProperty: "result", rootData })) {
+                                      vErrors = vErrors === null ? validate26.errors : vErrors.concat(validate26.errors);
+                                      errors = vErrors.length;
+                                    }
+                                    var _valid0 = _errs42 === errors;
+                                    valid1 = valid1 || _valid0;
+                                  }
                                 }
                               }
                             }
@@ -2494,7 +2781,7 @@ function validate10(data, { instancePath = "", parentData, parentDataProperty, r
                       errors++;
                     }
                     if (!(data3 === "invalid_request" || data3 === "conflict" || data3 === "not_found" || data3 === "internal_error")) {
-                      const err8 = { instancePath: instancePath + "/code", schemaPath: "#/$defs/Failure/properties/code/enum", keyword: "enum", params: { allowedValues: schema32.properties.code.enum }, message: "must be equal to one of the allowed values" };
+                      const err8 = { instancePath: instancePath + "/code", schemaPath: "#/$defs/Failure/properties/code/enum", keyword: "enum", params: { allowedValues: schema35.properties.code.enum }, message: "must be equal to one of the allowed values" };
                       if (vErrors === null) {
                         vErrors = [err8];
                       } else {

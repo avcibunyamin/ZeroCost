@@ -9,6 +9,7 @@ import {
   CircleHelp,
   Cpu,
   Database,
+  BookOpen,
   Folder,
   GitBranch,
   LayoutDashboard,
@@ -35,10 +36,12 @@ import "./App.css";
 import { Chat } from "./Chat";
 import { VaultControl } from "./VaultControl";
 import { Orchestration } from "./Orchestration";
+import { Knowledge } from "./Knowledge";
 
 type Page =
   | "chat"
   | "orchestration"
+  | "knowledge"
   | "overview"
   | "agents"
   | "connections"
@@ -49,6 +52,7 @@ const navigation = [
   { id: "overview", label: "Genel bakış", icon: LayoutDashboard },
   { id: "chat", label: "Sohbet", icon: MessageSquare },
   { id: "orchestration", label: "Ajan masası", icon: Users },
+  { id: "knowledge", label: "Bilgi yönetimi", icon: BookOpen },
   { id: "agents", label: "Ajanlar", icon: Bot },
   { id: "connections", label: "Model bağlantıları", icon: GitBranch },
   { id: "workspaces", label: "Çalışma alanları", icon: Folder },
@@ -384,7 +388,8 @@ export default function App() {
           <div hidden={page !== "orchestration"}>
             <Orchestration snapshot={snapshot} />
           </div>
-          {page === "chat" || page === "orchestration" ? null : page ===
+          {page === "knowledge" && <Knowledge />}
+          {page === "chat" || page === "orchestration" || page === "knowledge" ? null : page ===
             "overview" ? (
             <>
               <div className="page-heading">

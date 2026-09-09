@@ -106,3 +106,12 @@ Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırıl
 - SHA-256 iyimser eşzamanlılık kontrolü ve atomik workspace yazması
 - Shell olmadan, workspace cwd, executable izin listesi, azaltılmış ortam, 60 saniye ve 64 KiB terminal sınırı
 - SQLite v6 → v7 migration; bekleyen/sonuçlanan araç denetim kaydı
+
+## Faz 3 · Yerel bilgi ve embedding temeli
+
+- SQLite v7 → v8 kayıpsız migration; koleksiyon, kaynak, parça ve Unicode FTS5 indeksi
+- Harici vektör veritabanı olmadan taşınabilir little-endian float32 embedding depolama
+- Ollama embedding modeli keşfi ve `/api/embed` boyut probu; 1–32 girdi, 128.000 karakter, 16 MiB yanıt ve 8.192 boyut sınırları
+- Bilgi Yönetimi ekranından model seçerek koleksiyon oluşturma ve kalıcı belge/parça sayaçları
+- Ollama çevrimdışıyken kayıtlı koleksiyonları koruyan ve bağlantı durumunu ayrı gösteren davranış
+- 50 Python, 9 JavaScript sözleşme ve Rust köprü testi geçti

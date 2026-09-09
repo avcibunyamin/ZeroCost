@@ -364,6 +364,39 @@ class PricingCatalog(Model):
     entries: list[PriceEntry]
 
 
+class EmbeddingModel(Model):
+    name: str
+    size: int
+
+
+class KnowledgeCollectionInput(Model):
+    name: Name
+    embedding_provider: Literal["ollama"] = "ollama"
+    embedding_model: Name
+
+
+class KnowledgeCollection(KnowledgeCollectionInput):
+    id: str
+    dimensions: int
+    source_count: int
+    chunk_count: int
+
+
+class KnowledgeSnapshot(Model):
+    collections: list[KnowledgeCollection]
+    embedding_models: list[EmbeddingModel]
+    embedding_error: str = ""
+
+
+class KnowledgeSnapshotRequest(RequestBase):
+    method: Literal["knowledge.snapshot"]
+
+
+class KnowledgeCollectionCreateRequest(RequestBase):
+    method: Literal["knowledge.collection.create"]
+    params: KnowledgeCollectionInput
+
+
 class OrchestrationMessage(Model):
     sequence: int
     agent_id: str
@@ -509,7 +542,8 @@ Request = Annotated[Union[SnapshotRequest, ConnectionRequest, AgentRequest, Work
                          ModelsRequest, ChatStartRequest, CancelRequest, HistoryRequest, VaultRequest,
                          OrchestrationStartRequest, OrchestrationCancelRequest,
                          OrchestrationApprovalRequest, OrchestrationHistoryRequest,
-                         PricingCatalogRequest], Field(discriminator="method")]
+                         PricingCatalogRequest, KnowledgeSnapshotRequest,
+                         KnowledgeCollectionCreateRequest], Field(discriminator="method")]
 
 
 class Success(Model):
@@ -518,7 +552,7 @@ class Success(Model):
     ok: Literal[True] = True
     result: Union[Snapshot, OllamaModels, ChatHistory, Accepted, VaultStatus,
                   WorkspaceListing, WorkspaceFile, OrchestrationHistory,
-                  PricingCatalog]
+                  PricingCatalog, KnowledgeSnapshot]
 
 
 Response = Union[Success, Failure]

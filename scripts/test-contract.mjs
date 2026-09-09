@@ -62,6 +62,21 @@ test("pricing catalog response is typed and closed", () => {
   assert.equal(validate({ ...response, result: { ...response.result, secret: "x" } }), false);
 });
 
+test("knowledge snapshot is typed and closed", () => {
+  const response = {
+    protocol_version: 1, request_id: "knowledge", ok: true,
+    result: {
+      collections: [{ id: "c", name: "Docs", embedding_provider: "ollama",
+        embedding_model: "nomic-embed-text:latest", dimensions: 768,
+        source_count: 0, chunk_count: 0 }],
+      embedding_models: [{ name: "nomic-embed-text:latest", size: 100 }],
+      embedding_error: "",
+    },
+  };
+  assert.equal(validate(response), true);
+  assert.equal(validate({ ...response, result: { ...response.result, vector: [1, 2] } }), false);
+});
+
 test("orchestration stream attributes every chunk", () => {
   const chunk = { protocol_version: 1, type: "orchestration_chunk", run_id: "run",
     sequence: 1, agent_id: "a", phase: "analysis", token: "x", is_final: false };

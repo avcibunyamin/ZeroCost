@@ -18,6 +18,7 @@ from .storage import Store
 from .workspace_tools import inspect_file_size, list_directory, read_file
 from .models import OrchestrationEnd, OrchestrationRoute
 from .pricing import CATALOG_VERSION, catalog, estimate_plan
+from .embeddings import OllamaEmbeddings
 
 MAX_FRAME_BYTES = 64 * 1024
 request_adapter = TypeAdapter(Request)
@@ -68,10 +69,12 @@ def emit(value):
 
 
 class ChatService:
-    def __init__(self, store: Store, output=emit, provider_factory=get_provider):
+    def __init__(self, store: Store, output=emit, provider_factory=get_provider,
+                 embedding_factory=OllamaEmbeddings):
         self.store = store
         self.output = output
         self.provider_factory = provider_factory
+        self.embedding_factory = embedding_factory
         self.tasks = {}
         self.orchestrator = None
 
@@ -137,7 +140,32 @@ class ChatService:
         except (ValidationError, ValueError):
             return dispatch(self.store, raw)
         try:
-            if request.method == 'ollama.models':
+            if request.method == 'knowledge.snapshot':
+                try:
+                    models = await asyncio.wait_for(
+                        self.embedding_factory().list_models(), timeout=8)
+                    result = self.store.knowledge_snapshot(models)
+                except (ProviderError, asyncio.TimeoutError) as exc:
+                    message = (str(exc) if isinstance(exc, ProviderError)
+                               else 'Ollama embedding modeli sorgusu zaman aşımına uğradı.')
+                    result = self.store.knowledge_snapshot().model_copy(
+                        update={'embedding_error': message})
+            elif request.method == 'knowledge.collection.create':
+                provider = self.embedding_factory(request.params.embedding_model)
+                try:
+                    models = await asyncio.wait_for(provider.list_models(), timeout=8)
+                except asyncio.TimeoutError:
+                    raise ValueError('Ollama embedding modeli sorgusu zaman aşımına uğradı.') from None
+                if request.params.embedding_model not in {item['name'] for item in models}:
+                    raise ValueError('Seçilen Ollama embedding modeli bulunamadı.')
+                try:
+                    vectors = await asyncio.wait_for(
+                        provider.embed(['ZeroCost embedding dimension probe']), timeout=90)
+                except asyncio.TimeoutError:
+                    raise ValueError('Embedding boyut probu zaman aşımına uğradı.') from None
+                self.store.create_knowledge_collection(request.params, len(vectors[0]))
+                result = self.store.knowledge_snapshot(models)
+            elif request.method == 'ollama.models':
                 result = await asyncio.wait_for(OllamaProvider('').list_models(), timeout=8)
             elif request.method == 'chat.history':
                 result = self.store.history(request.params.agent_id)

@@ -471,6 +471,25 @@
       "title": "ConnectionRequest",
       "type": "object"
     },
+    "EmbeddingModel": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "size": {
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "size"
+      ],
+      "title": "EmbeddingModel",
+      "type": "object"
+    },
     "Failure": {
       "additionalProperties": false,
       "properties": {
@@ -561,6 +580,177 @@
         "params"
       ],
       "title": "HistoryRequest",
+      "type": "object"
+    },
+    "KnowledgeCollection": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "embedding_provider": {
+          "const": "ollama",
+          "default": "ollama",
+          "title": "Embedding Provider",
+          "type": "string"
+        },
+        "embedding_model": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Embedding Model",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "dimensions": {
+          "title": "Dimensions",
+          "type": "integer"
+        },
+        "source_count": {
+          "title": "Source Count",
+          "type": "integer"
+        },
+        "chunk_count": {
+          "title": "Chunk Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "embedding_provider",
+        "embedding_model",
+        "id",
+        "dimensions",
+        "source_count",
+        "chunk_count"
+      ],
+      "title": "KnowledgeCollection",
+      "type": "object"
+    },
+    "KnowledgeCollectionCreateRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "knowledge.collection.create",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/KnowledgeCollectionInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "KnowledgeCollectionCreateRequest",
+      "type": "object"
+    },
+    "KnowledgeCollectionInput": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "embedding_provider": {
+          "const": "ollama",
+          "default": "ollama",
+          "title": "Embedding Provider",
+          "type": "string"
+        },
+        "embedding_model": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Embedding Model",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "embedding_provider",
+        "embedding_model"
+      ],
+      "title": "KnowledgeCollectionInput",
+      "type": "object"
+    },
+    "KnowledgeSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "collections": {
+          "items": {
+            "$ref": "#/$defs/KnowledgeCollection"
+          },
+          "title": "Collections",
+          "type": "array"
+        },
+        "embedding_models": {
+          "items": {
+            "$ref": "#/$defs/EmbeddingModel"
+          },
+          "title": "Embedding Models",
+          "type": "array"
+        },
+        "embedding_error": {
+          "default": "",
+          "title": "Embedding Error",
+          "type": "string"
+        }
+      },
+      "required": [
+        "collections",
+        "embedding_models",
+        "embedding_error"
+      ],
+      "title": "KnowledgeSnapshot",
+      "type": "object"
+    },
+    "KnowledgeSnapshotRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "knowledge.snapshot",
+          "title": "Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method"
+      ],
+      "title": "KnowledgeSnapshotRequest",
       "type": "object"
     },
     "ModelsRequest": {
@@ -2033,6 +2223,9 @@
             },
             {
               "$ref": "#/$defs/PricingCatalog"
+            },
+            {
+              "$ref": "#/$defs/KnowledgeSnapshot"
             }
           ],
           "title": "Result"
@@ -2502,6 +2695,8 @@
           "chat.history": "#/$defs/HistoryRequest",
           "chat.start": "#/$defs/ChatStartRequest",
           "connection.create": "#/$defs/ConnectionRequest",
+          "knowledge.collection.create": "#/$defs/KnowledgeCollectionCreateRequest",
+          "knowledge.snapshot": "#/$defs/KnowledgeSnapshotRequest",
           "ollama.models": "#/$defs/ModelsRequest",
           "orchestration.approve": "#/$defs/OrchestrationApprovalRequest",
           "orchestration.cancel": "#/$defs/OrchestrationCancelRequest",
@@ -2567,6 +2762,12 @@
         },
         {
           "$ref": "#/$defs/PricingCatalogRequest"
+        },
+        {
+          "$ref": "#/$defs/KnowledgeSnapshotRequest"
+        },
+        {
+          "$ref": "#/$defs/KnowledgeCollectionCreateRequest"
         }
       ],
       "title": "Request"
