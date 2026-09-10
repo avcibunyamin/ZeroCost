@@ -7,7 +7,7 @@ from .embeddings import MAX_EMBED_INPUTS
 from .documents import DocumentBlock
 from .chunking import SemanticChunk
 
-INDEX_VERSION = 'zerocost-chunk-v1'
+INDEX_VERSION = 'zerocost-context-v2'
 HASH_VERSION = INDEX_VERSION.encode() + b'\0'
 
 
@@ -56,13 +56,16 @@ class KnowledgeIngestor:
                 and current['index_version'] == INDEX_VERSION):
             return IndexResult('unchanged', len(chunks), 0, len(chunks))
 
-        hashes = [chunk_hash(item.content) for item in chunks]
+        embedding_inputs = [
+            item.embedding_content if isinstance(item, SemanticChunk) else item.content
+            for item in chunks]
+        hashes = [chunk_hash(content) for content in embedding_inputs]
         cached = self.store.cached_chunk_embeddings(collection_id, hashes)
         missing = []
         seen = set()
-        for item, item_hash in zip(chunks, hashes):
+        for item_hash, embedding_input in zip(hashes, embedding_inputs):
             if item_hash not in cached and item_hash not in seen:
-                missing.append((item_hash, item.content))
+                missing.append((item_hash, embedding_input))
                 seen.add(item_hash)
 
         provider = self.embedding_factory(collection['embedding_model'])

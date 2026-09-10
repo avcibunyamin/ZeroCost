@@ -1,6 +1,7 @@
 import pytest
 
-from zerocost.chunking import (SemanticChunk, merge_semantic_blocks,
+from zerocost.chunking import (SemanticChunk, apply_context_overlap,
+                               build_semantic_chunks, merge_semantic_blocks,
                                split_oversized_code, split_oversized_text)
 from zerocost.documents import DocumentBlock, parse_markdown
 
@@ -167,3 +168,61 @@ def test_code_splitter_leaves_text_and_regular_code_unchanged():
         DocumentBlock('code', '```py\nx = 1\n```', 1, 3),
     ], target_chars=50, max_chars=100)[0]
     assert split_oversized_code([text, code], target_chars=50, max_chars=100) == [text, code]
+
+
+def test_text_overlap_uses_sentence_tail_without_crossing_sections():
+    blocks = parse_markdown("""# Bir
+
+Birinci cümle. İkinci cümle bağlamdır. Üçüncü cümle sondur.
+
+Dördüncü cümle. Beşinci cümle.
+
+# İki
+
+Yeni bölüm önceki bağlamı almamalı.
+""")
+    chunks = build_semantic_chunks(blocks, target_chars=70, max_chars=180, overlap_chars=40)
+    assert any(chunk.overlap_kind == 'text' for chunk in chunks)
+    overlapped = next(chunk for chunk in chunks if chunk.overlap_kind == 'text')
+    assert overlapped.overlap_content
+    assert overlapped.overlap_content in chunks[chunks.index(overlapped) - 1].content
+    assert 'Önceki metin bağlamı' in overlapped.embedding_content
+    assert all(len(chunk.embedding_content) <= 180 for chunk in chunks)
+    second_section = next(chunk for chunk in chunks if chunk.heading_path == ('İki',))
+    assert second_section.overlap_content == ''
+
+
+def test_code_overlap_is_quoted_and_marks_scope_as_reference():
+    body = '\n'.join(f'def fn_{index}():\n    value = {index}\n    return value\n'
+                     for index in range(8))
+    chunks = build_semantic_chunks([
+        DocumentBlock('code', f'```python\n{body}\n```', 1, 33, ('Kod',)),
+    ], target_chars=100, max_chars=240, overlap_chars=70)
+    overlapped = next(chunk for chunk in chunks[1:] if chunk.overlap_kind == 'code')
+    assert 'referans, yeniden tanım değil' in overlapped.embedding_content
+    assert '\n> ' in overlapped.embedding_content
+    assert overlapped.content.startswith('```python\n')
+    assert all(len(chunk.embedding_content) <= 240 for chunk in chunks)
+
+
+def test_overlap_keeps_primary_content_and_respects_type_and_size():
+    text = [
+        SemanticChunk('a' * 50 + '. Son.', 1, 1, (), ('paragraph',)),
+        SemanticChunk('b' * 80, 2, 2, (), ('paragraph',)),
+    ]
+    result = apply_context_overlap(text, overlap_chars=30, max_chars=120)
+    assert result[1].content == text[1].content
+    assert len(result[1].embedding_content) <= 120
+    assert apply_context_overlap(text, overlap_chars=0, max_chars=120) == text
+    with pytest.raises(ValueError, match='Overlap'):
+        apply_context_overlap(text, overlap_chars=61, max_chars=120)
+
+
+def test_overlap_does_not_cross_between_text_and_code():
+    chunks = [
+        SemanticChunk('Önceki açıklama.', 1, 1, ('Aynı',), ('paragraph',)),
+        SemanticChunk('```py\nx = 1\n```', 2, 4, ('Aynı',), ('code',)),
+        SemanticChunk('Sonraki açıklama.', 5, 5, ('Aynı',), ('paragraph',)),
+    ]
+    result = apply_context_overlap(chunks, overlap_chars=30, max_chars=160)
+    assert all(chunk.overlap_content == '' for chunk in result)

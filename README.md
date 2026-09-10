@@ -37,7 +37,7 @@ Windows'ta Python komutu `.venv\Scripts\python.exe` olur. Node yardımcı betikl
 - Kullanıcının seçtiği en fazla 10 çalışma alanı dosyasını çoklu ajan bağlamına ekleme.
 - Yerel Ollama embedding modeli keşfi, bilgi koleksiyonları ve SQLite FTS5/float32 vektör depolama temeli.
 
-Claude ve Gemini akışlı sohbet adaptörleri ve Rust yönetiminde OS anahtar kasası eklendi. Faz 2'nin çoklu ajan, otomatik router, yürütme bütçesi, kontrollü çalışma alanı yazması ve terminal dilimi çalışır. RAG'ın veri ve embedding temeli hazırdır; belge işleme ve ajan arama aracı henüz uygulanmadı. Bu sürüm üretime hazır değildir.
+Claude ve Gemini akışlı sohbet adaptörleri ve Rust yönetiminde OS anahtar kasası eklendi. Faz 2'nin çoklu ajan, otomatik router, yürütme bütçesi, kontrollü çalışma alanı yazması ve terminal dilimi çalışır. RAG'ın veri, embedding ve bağlam duyarlı belge parçalama hattı hazırdır; kaynak ekleme arayüzü ve ajan arama aracı henüz uygulanmadı. Bu sürüm üretime hazır değildir.
 
 ## Bulut bağlantısı ve anahtar kasası
 
@@ -75,15 +75,17 @@ Entegrasyon referansları: [keyring](https://docs.rs/keyring/3.6.3/keyring/), [A
 
 **Bilgi yönetimi** ekranı Ollama'nın embedding yeteneği bildiren kurulu modellerini keşfeder. Koleksiyon oluşturulurken `/api/embed` ile yerel bir boyut probu yapılır; dönen vektör doğrulanır, L2 normalize edilir ve koleksiyonun model/boyut sözleşmesi SQLite'a kaydedilir. Ollama erişilemez olsa da önceden kaydedilmiş koleksiyonlar görüntülenir. API anahtarı veya ücretli bulut çağrısı kullanılmaz.
 
-SQLite şema v9; koleksiyon, kaynak ve parça tablolarını, Unicode FTS5 tam metin indeksini ve küçük endian float32 embedding BLOB'larını içerir. Belgenin tam UTF-8 içeriği ve her chunk SHA-256 ile özetlenir. Aynı içerik ve indeks sürümü tekrar işlendiğinde embedding çağrısı yapılmaz; belge değiştiğinde koleksiyon içindeki aynı chunk vektörleri yeniden kullanılır ve yalnız benzersiz yeni parçalar 32'lik partilerle embed edilir. Sürümlü chunk hash alanı, ileride ayrıştırma/embedding girdisi değiştiğinde eski cache'i güvenle geçersiz kılar. Kaynak yenileme aynı koleksiyon/workspace/yol anahtarında transaction içinde eskisini değiştirir; vektör boyutu uyuşmazlığı reddedilir. Bu taşınabilir temel harici bir vektör veritabanı gerektirmez. Sliding-window chunking, kaynak ekleme UI'si, hibrit sıralama ve ajan `knowledge.search` aracı sonraki dilimin kapsamındadır.
+SQLite şema v9; koleksiyon, kaynak ve parça tablolarını, Unicode FTS5 tam metin indeksini ve küçük endian float32 embedding BLOB'larını içerir. Belgenin tam UTF-8 içeriği ve her chunk SHA-256 ile özetlenir. Aynı içerik ve indeks sürümü tekrar işlendiğinde embedding çağrısı yapılmaz; belge değiştiğinde koleksiyon içindeki aynı chunk vektörleri yeniden kullanılır ve yalnız benzersiz yeni parçalar 32'lik partilerle embed edilir. Sürümlü chunk hash alanı, ileride ayrıştırma/embedding girdisi değiştiğinde eski cache'i güvenle geçersiz kılar. Kaynak yenileme aynı koleksiyon/workspace/yol anahtarında transaction içinde eskisini değiştirir; vektör boyutu uyuşmazlığı reddedilir. Bu taşınabilir temel harici bir vektör veritabanı gerektirmez. Kaynak ekleme UI'si, hibrit sıralama ve ajan `knowledge.search` aracı sonraki dilimin kapsamındadır.
 
-Metin ve Markdown ayrıştırıcısı CRLF/CR satır sonlarını deterministik biçimde normalize eder; kaynak satır numaralarını koruyarak başlık, paragraf, liste, tablo, alıntı, fenced code ve YAML frontmatter blokları üretir. ATX/Setext başlıkları ile başlık hiyerarşisi korunur; code içindeki Markdown işaretleri ayrıştırılmaz. Girdi NUL, 1.000.000 karakter ve 50.000 satır sınırlarıyla çevrelenir. Ayrıştırıcı henüz semantik blokları boyuta göre bölmez; sliding-window/overlap katmanı sonraki dilimdir.
+Metin ve Markdown ayrıştırıcısı CRLF/CR satır sonlarını deterministik biçimde normalize eder; kaynak satır numaralarını koruyarak başlık, paragraf, liste, tablo, alıntı, fenced code ve YAML frontmatter blokları üretir. ATX/Setext başlıkları ile başlık hiyerarşisi korunur; code içindeki Markdown işaretleri ayrıştırılmaz. Girdi NUL, 1.000.000 karakter ve 50.000 satır sınırlarıyla çevrelenir.
 
 Semantik birleştirici varsayılan 2.400 karakter hedefi ve 3.200 karakter azami sınırıyla komşu küçük blokları paketler. Yeni başlık her zaman yeni bir bölüm başlatır; frontmatter/başlık ilk gövde bloğuyla birlikte tutulur. Hedefe ulaşıldığında doğal blok sınırı tercih edilir. Tek başına büyük paragraf veya code bloğu bu aşamada kesilmez ya da kaybedilmez; açıkça `oversized` işaretlenerek güvenli büyük-blok bölücüsüne bırakılır. Üretilen her chunk satır aralığını, başlık yolunu ve içerdiği blok türlerini taşır.
 
 Oversized düz metin bölücüsü cümle sonlarını önceliklendirir; yaygın Türkçe/İngilizce kısaltmaları ve tek harfli isimleri yanlış sınır saymaz. Tek cümle azami boyutu aşıyorsa sırasıyla satır, noktalı virgül, iki nokta, virgül, kelime ve son çare olarak Unicode karakter sınırına iner. Başlık için ilk gövde parçasında yer ayırır, her parçanın özgün satır aralığını kaynak bloktan hesaplar ve hiçbir çıktının azami karakter sınırını aşmasına izin vermez. Code içeren oversized chunk'lar değiştirilmeden ayrı kod bölücüsüne aktarılır.
 
-Oversized code bölücüsü özgün backtick/tilde fence açılışını ve dil etiketini her parçada yeniden üretir, parçayı aynı fence ile kapatır. İlk parça frontmatter/başlık bağlamını korur. Bölme önce boş satır ve üst seviye `class`, `def`, `function`, `fn`, `struct`, `interface` gibi bildirim sınırlarını; sonra kaynak satırını tercih eder. Tek bir minified satır limite sığmıyorsa içerik kaybetmeden Unicode karakter sınırına iner ve tüm parçalar aynı kaynak satırını işaret eder. Kapanmamış kaynak fence güvenli biçimde kapatılır. Bu katman henüz overlap eklemez.
+Oversized code bölücüsü özgün backtick/tilde fence açılışını ve dil etiketini her parçada yeniden üretir, parçayı aynı fence ile kapatır. İlk parça frontmatter/başlık bağlamını korur. Bölme önce boş satır ve üst seviye `class`, `def`, `function`, `fn`, `struct`, `interface` gibi bildirim sınırlarını; sonra kaynak satırını tercih eder. Tek bir minified satır limite sığmıyorsa içerik kaybetmeden Unicode karakter sınırına iner ve tüm parçalar aynı kaynak satırını işaret eder. Kapanmamış kaynak fence güvenli biçimde kapatılır.
+
+Birleşik chunk hattı semantik paketleme, oversized düz metin bölme, fenced-code bölme ve kontrollü overlap aşamalarını tek sırada çalıştırır. Düz metin yalnız aynı başlık yolundaki önceki cümle kuyruğunu alır; kod yalnız önceki kod parçasının kapsam bildirimi ve son satırlarını taşır. Kod bağlamı embedding girdisinde Markdown alıntısı ve “referans, yeniden tanım değil” etiketiyle ayrılır. Ana içerik ile overlap ayrı tutulur: SQLite/FTS yalnız ana parçayı saklar ve arar, embedding hash'i ile vektör girdisi etiketli birleşik bağlamı kullanır. Tip veya bölüm sınırları aşılmaz ve birleşik girdi 3.200 karakterlik katı sınırı geçmez.
 
 Embedding API sözleşmesi: [Ollama Embeddings](https://docs.ollama.com/capabilities/embeddings) ve [Ollama `/api/embed`](https://docs.ollama.com/api/embed).
 
@@ -135,9 +137,8 @@ macOS uygulaması `src-tauri/target/release/bundle/macos/ZeroCost.app` altında 
 
 ## Sonraki geliştirme dilimi
 
-1. Metin ve code chunk'ları için kontrollü sliding-window overlap.
-2. Kaynak ekleme ve indeksleme arayüzü.
-3. Hibrit FTS/vektör sıralaması, kaynak alıntıları ve ajan `knowledge.search` aracı.
-4. Skill paket manifesti, sürümleme ve izin beyanları.
+1. Güvenli dosya seçiciyle `.txt`/Markdown kaynak ekleme arayüzü ve birleşik ingestion bağlantısı.
+2. Koleksiyonlarda hibrit FTS + cosine arama ve kaynak referanslı `knowledge.search` ajan aracı.
+3. Skill paket manifesti, sürümleme ve izin beyanları.
 5. Kesilmiş üretim düğümünü kontrollü yeniden deneme ve kısmi görev devamı.
 6. Sağlayıcı cache/batch tarifeleri ve kullanıcıya özel fiyat profilleri.

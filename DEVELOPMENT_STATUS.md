@@ -160,3 +160,12 @@ Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırıl
 - Kapanmamış fence'i tamamlama; tek minified satırda kayıpsız karakter fallback'i
 - Parça başına katı azami boyut ve özgün kaynak satırı provenance bilgisi
 - 76 Python ve 9 JavaScript sözleşme testi geçti
+
+## Faz 3 · Bağlam duyarlı sliding-window overlap
+
+- Semantik paketleme, düz metin ve fenced-code bölme ile overlap'i sıralayan tek giriş noktası
+- Başlık yolu ve metin/code türü sınırlarını aşmayan önceki parça bağlamı
+- Metinde cümle kuyruğu; kodda kapsam bildirimi ve son satırları alıntılayan referans zarfı
+- SQLite/FTS için değişmeyen ana içerik; embedding ve içerik hash'i için etiketli birleşik bağlam
+- Overlap zarfı dahil katı azami boyut ve kaynak satır aralığı bilgisi
+- 81 Python ve 9 JavaScript sözleşme testi geçti

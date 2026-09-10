@@ -1,7 +1,8 @@
 """Semantic block packing; oversized block splitting and overlap are separate stages."""
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import re
+from typing import Literal
 
 from .documents import BlockKind, DocumentBlock, FENCE
 
@@ -18,6 +19,23 @@ class SemanticChunk:
     block_kinds: tuple[BlockKind, ...]
     oversized: bool = False
     source_blocks: tuple[DocumentBlock, ...] = ()
+    overlap_content: str = ''
+    overlap_start_line: int | None = None
+    overlap_end_line: int | None = None
+    overlap_kind: Literal['text', 'code'] | None = None
+
+    @property
+    def embedding_content(self) -> str:
+        if not self.overlap_content:
+            return self.content
+        lines = f'{self.overlap_start_line}-{self.overlap_end_line}'
+        if self.overlap_kind == 'code':
+            quoted = '\n'.join(f'> {line}' for line in self.overlap_content.split('\n'))
+            header = f'[Önceki kod bağlamı · referans, yeniden tanım değil · satırlar {lines}]'
+            current = '[Güncel kod parçası]'
+            return f'{header}\n{quoted}\n\n{current}\n{self.content}'
+        header = f'[Önceki metin bağlamı · satırlar {lines}]'
+        return f'{header}\n{self.overlap_content}\n\n[Güncel parça]\n{self.content}'
 
 
 def _joined_length(parts: list[str], addition: str) -> int:
@@ -335,3 +353,122 @@ def split_oversized_code(chunks: list[SemanticChunk], *, target_chars: int = 2_4
         result.extend(_fenced_code_parts(
             code_blocks[0], context, target_chars, max_chars))
     return result
+
+
+def _tail_text(content: str, limit: int) -> str:
+    spans = _sentence_spans(content)
+    selected = []
+    used = 0
+    for start, end in reversed(spans):
+        sentence = content[start:end].strip()
+        extra = len(sentence) + (1 if selected else 0)
+        if selected and used + extra > limit:
+            break
+        if not selected and len(sentence) > limit:
+            tail = sentence[-limit:]
+            space = tail.find(' ')
+            return tail[space + 1:] if 0 <= space < len(tail) - 1 else tail
+        selected.append(sentence)
+        used += extra
+    return ' '.join(reversed(selected))
+
+
+def _code_body(content: str) -> list[str]:
+    lines = content.split('\n')
+    opening = next((index for index, line in enumerate(lines) if FENCE.match(line)), None)
+    if opening is None:
+        return []
+    body = lines[opening + 1:]
+    if body:
+        stripped = body[-1].lstrip()
+        token = stripped.split()[0] if stripped.split() else ''
+        if token and set(token) in ({'`'}, {'~'}) and len(token) >= 3:
+            body = body[:-1]
+    return body
+
+
+def _tail_code(content: str, limit: int) -> str:
+    lines = _code_body(content)
+    if not lines:
+        return ''
+    declaration = next((line.strip() for line in reversed(lines)
+                        if CODE_DECLARATION.match(line.strip())), '')
+    scope = f'Kapsam: {declaration}' if declaration else ''
+    remaining = max(limit - len(scope) - (1 if scope else 0), 1)
+    tail_lines = []
+    used = 0
+    for line in reversed(lines):
+        extra = len(line) + (1 if tail_lines else 0)
+        if tail_lines and used + extra > remaining:
+            break
+        if not tail_lines and len(line) > remaining:
+            line = line[-remaining:]
+            extra = len(line)
+        tail_lines.append(line)
+        used += extra
+    tail = '\n'.join(reversed(tail_lines)).strip()
+    if scope and declaration not in tail:
+        return f'{scope}\n{tail}'.strip()
+    return tail or scope
+
+
+def apply_context_overlap(chunks: list[SemanticChunk], *, overlap_chars: int = 320,
+                          max_chars: int = 3_200) -> list[SemanticChunk]:
+    """Add type-aware prior context while keeping primary content and FTS text unchanged."""
+    if not 0 <= overlap_chars <= min(2_048, max_chars // 2):
+        raise ValueError('Overlap 0 ile azami chunk boyutunun yarısı arasında olmalı.')
+    if overlap_chars == 0:
+        return chunks
+    result = []
+    for index, chunk in enumerate(chunks):
+        if index == 0 or chunk.heading_path != chunks[index - 1].heading_path:
+            result.append(chunk)
+            continue
+        previous = chunks[index - 1]
+        current_is_code = 'code' in chunk.block_kinds
+        previous_is_code = 'code' in previous.block_kinds
+        if current_is_code != previous_is_code:
+            result.append(chunk)
+            continue
+        overlap = (_tail_code(previous.content, overlap_chars) if current_is_code
+                   else _tail_text(previous.content, overlap_chars))
+        if not overlap:
+            result.append(chunk)
+            continue
+        candidate = replace(
+            chunk, overlap_content=overlap,
+            overlap_start_line=previous.start_line,
+            overlap_end_line=previous.end_line,
+            overlap_kind='code' if current_is_code else 'text')
+        while overlap and len(candidate.embedding_content) > max_chars:
+            excess = len(candidate.embedding_content) - max_chars
+            overlap = overlap[min(max(excess, 1), len(overlap)):].lstrip()
+            candidate = replace(candidate, overlap_content=overlap)
+        if overlap and len(candidate.embedding_content) <= max_chars:
+            result.append(candidate)
+        else:
+            result.append(chunk)
+    return result
+
+
+def build_semantic_chunks(blocks: list[DocumentBlock], *, target_chars: int = 2_400,
+                          max_chars: int = 3_200,
+                          overlap_chars: int = 320) -> list[SemanticChunk]:
+    """Run semantic packing, text/code splitting, then bounded type-aware overlap."""
+    _validate_sizes(target_chars, max_chars)
+    if not 0 <= overlap_chars <= min(2_048, max_chars // 2):
+        raise ValueError('Overlap 0 ile azami chunk boyutunun yarısı arasında olmalı.')
+    # Reserve deterministic envelope space so ordinary chunks receive the requested overlap.
+    reserve = overlap_chars + 96 if overlap_chars else 0
+    primary_max = max_chars - reserve
+    if primary_max < MIN_TARGET_CHARS:
+        raise ValueError('Overlap sonrasında ana chunk için en az 32 karakter kalmalı.')
+    primary_target = min(target_chars, primary_max)
+    chunks = merge_semantic_blocks(
+        blocks, target_chars=primary_target, max_chars=primary_max)
+    chunks = split_oversized_text(
+        chunks, target_chars=primary_target, max_chars=primary_max)
+    chunks = split_oversized_code(
+        chunks, target_chars=primary_target, max_chars=primary_max)
+    return apply_context_overlap(
+        chunks, overlap_chars=overlap_chars, max_chars=max_chars)

@@ -1,5 +1,6 @@
 import asyncio
 
+from zerocost.chunking import SemanticChunk
 from zerocost.ingestion import DocumentChunk, KnowledgeIngestor, chunk_hash, source_hash
 from zerocost.models import KnowledgeCollectionInput, WorkspaceInput
 from zerocost.storage import Store
@@ -82,6 +83,40 @@ def test_embedding_misses_are_batched_at_provider_limit(tmp_path):
             collection_id, workspace.id, 'large.md', 'large', chunks)
         assert result.embedded_count == 33
         assert [len(batch) for batch in CountingEmbeddings.calls] == [32, 1]
+        store.close()
+
+    asyncio.run(scenario())
+
+
+def test_overlap_is_embedded_but_primary_content_is_stored(tmp_path):
+    async def scenario():
+        root = tmp_path / 'project'
+        root.mkdir()
+        store = Store(tmp_path / 'overlap.sqlite3')
+        store.create_workspace(WorkspaceInput(name='Project', path=str(root)))
+        workspace = store.snapshot().workspaces[0]
+        collection_id = store.create_knowledge_collection(KnowledgeCollectionInput(
+            name='Docs', embedding_model='embed-local'), 3)
+        chunk = SemanticChunk(
+            content='Güncel ve aranabilir ana içerik.',
+            start_line=4,
+            end_line=5,
+            heading_path=('Bölüm',),
+            block_kinds=('paragraph',),
+            overlap_content='Önceki bağlam.',
+            overlap_start_line=1,
+            overlap_end_line=3,
+            overlap_kind='text',
+        )
+        CountingEmbeddings.calls = []
+        await KnowledgeIngestor(store, CountingEmbeddings).index_chunks(
+            collection_id, workspace.id, 'guide.md', 'belge', [chunk])
+
+        assert CountingEmbeddings.calls == [[chunk.embedding_content]]
+        stored = store.db.execute(
+            'SELECT content, content_hash FROM knowledge_chunks').fetchone()
+        assert stored['content'] == chunk.content
+        assert stored['content_hash'] == chunk_hash(chunk.embedding_content)
         store.close()
 
     asyncio.run(scenario())
