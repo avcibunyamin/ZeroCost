@@ -142,3 +142,12 @@ Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırıl
 - Tek büyük blokta içerik kaybetmeyen açık `oversized` işareti
 - 32 ≤ hedef ≤ azami ≤ 32.000 yapılandırma doğrulaması
 - 67 Python ve 9 JavaScript sözleşme testi geçti
+
+## Faz 3 · Oversized düz metin bölme
+
+- Cümle sınırı öncelikli deterministik ayrıştırma; yaygın kısaltma ve tek harf koruması
+- Uzun tek cümlede satır → noktalama → kelime → Unicode karakter fallback zinciri
+- İlk gövde parçasında başlığa yer ayıran katı azami boyut garantisi
+- Her alt parçada özgün başlangıç/bitiş satırı ve başlık yolu
+- Code içeren chunk'ları ayrı kod bölücüsüne değiştirmeden aktarma
+- 72 Python ve 9 JavaScript sözleşme testi geçti

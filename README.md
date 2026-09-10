@@ -81,6 +81,8 @@ Metin ve Markdown ayrıştırıcısı CRLF/CR satır sonlarını deterministik b
 
 Semantik birleştirici varsayılan 2.400 karakter hedefi ve 3.200 karakter azami sınırıyla komşu küçük blokları paketler. Yeni başlık her zaman yeni bir bölüm başlatır; frontmatter/başlık ilk gövde bloğuyla birlikte tutulur. Hedefe ulaşıldığında doğal blok sınırı tercih edilir. Tek başına büyük paragraf veya code bloğu bu aşamada kesilmez ya da kaybedilmez; açıkça `oversized` işaretlenerek güvenli büyük-blok bölücüsüne bırakılır. Üretilen her chunk satır aralığını, başlık yolunu ve içerdiği blok türlerini taşır.
 
+Oversized düz metin bölücüsü cümle sonlarını önceliklendirir; yaygın Türkçe/İngilizce kısaltmaları ve tek harfli isimleri yanlış sınır saymaz. Tek cümle azami boyutu aşıyorsa sırasıyla satır, noktalı virgül, iki nokta, virgül, kelime ve son çare olarak Unicode karakter sınırına iner. Başlık için ilk gövde parçasında yer ayırır, her parçanın özgün satır aralığını kaynak bloktan hesaplar ve hiçbir çıktının azami karakter sınırını aşmasına izin vermez. Code içeren oversized chunk'lar değiştirilmeden ayrı kod bölücüsüne aktarılır.
+
 Embedding API sözleşmesi: [Ollama Embeddings](https://docs.ollama.com/capabilities/embeddings) ve [Ollama `/api/embed`](https://docs.ollama.com/api/embed).
 
 ## Pydantic → TypeScript sözleşmesi
@@ -131,7 +133,7 @@ macOS uygulaması `src-tauri/target/release/bundle/macos/ZeroCost.app` altında 
 
 ## Sonraki geliştirme dilimi
 
-1. Büyük paragraf/code bloklarını güvenli bölme ve sliding-window overlap.
+1. Oversized code bloklarını satır/yapı sınırında güvenli bölme ve sliding-window overlap.
 2. Kaynak ekleme ve indeksleme arayüzü.
 3. Hibrit FTS/vektör sıralaması, kaynak alıntıları ve ajan `knowledge.search` aracı.
 4. Skill paket manifesti, sürümleme ve izin beyanları.
