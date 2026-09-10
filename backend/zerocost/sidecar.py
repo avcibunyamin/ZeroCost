@@ -24,6 +24,7 @@ from .documents import parse_document
 from .ingestion import KnowledgeIngestor
 from .knowledge_files import read_knowledge_source
 from .models import KnowledgeIngestionProgress, KnowledgeIngestionResult
+from .knowledge_search import HybridKnowledgeSearch
 
 MAX_FRAME_BYTES = 64 * 1024
 request_adapter = TypeAdapter(Request)
@@ -88,7 +89,8 @@ class ChatService:
             # Keep normal startup fast; LangGraph is loaded only for an agent-table run.
             from .orchestration import OrchestrationEngine
             self.orchestrator = OrchestrationEngine(self.store, self.output,
-                                                    self.provider_factory)
+                                                    self.provider_factory,
+                                                    self.embedding_factory)
         await self.orchestrator.run(params, credentials, resume=resume,
                                     initial_sequence=initial_sequence)
 
@@ -229,6 +231,14 @@ class ChatService:
                     embedded_count=indexed.embedded_count,
                     reused_count=indexed.reused_count,
                 )
+            elif request.method == 'knowledge.search':
+                try:
+                    result = await asyncio.wait_for(HybridKnowledgeSearch(
+                        self.store, self.embedding_factory).search(
+                            request.params.collection_id, request.params.query,
+                            request.params.limit), timeout=90)
+                except asyncio.TimeoutError:
+                    raise ValueError('Bilgi araması zaman aşımına uğradı.') from None
             elif request.method == 'ollama.models':
                 result = await asyncio.wait_for(OllamaProvider('').list_models(), timeout=8)
             elif request.method == 'chat.history':
@@ -250,7 +260,8 @@ class ChatService:
                 if self.orchestrator is None:
                     from .orchestration import OrchestrationEngine
                     self.orchestrator = OrchestrationEngine(self.store, self.output,
-                                                            self.provider_factory)
+                                                            self.provider_factory,
+                                                            self.embedding_factory)
                 routed_ids, reason, planned = self.orchestrator.route(params, snapshot)
                 params = params.model_copy(update={'agent_ids': routed_ids})
                 if params.enabled_tools:
@@ -259,11 +270,15 @@ class ChatService:
                     missing = [tool for tool in params.enabled_tools if tool not in coordinator.permissions]
                     if missing:
                         raise ValueError(f'{coordinator.name} için {", ".join(missing)} izni gerekli.')
+                for collection_id in params.knowledge_collection_ids:
+                    if self.store.knowledge_collection(collection_id) is None:
+                        raise ValueError('Seçilen bilgi koleksiyonu bulunamadı.')
                 context_bytes = sum(inspect_file_size(
                     self.store, agents[0].id, params.workspace_id, path)
                     for path in params.context_paths) if params.context_paths else 0
                 estimated_cost = estimate_plan(snapshot, params.agent_ids, params.rounds,
-                    params.objective, context_bytes, params.max_output_tokens)
+                    params.objective, context_bytes, params.max_output_tokens,
+                    extra_synthesis=bool(params.knowledge_collection_ids))
                 if estimated_cost > params.max_cost_microusd:
                     raise ValueError(
                         f'Tahmini üst maliyet ${estimated_cost / 1_000_000:.4f}; '
@@ -275,7 +290,8 @@ class ChatService:
                     estimated_max_cost_microusd=estimated_cost,
                     price_catalog_version=CATALOG_VERSION,
                     workspace_id=params.workspace_id, context_paths=params.context_paths,
-                    enabled_tools=params.enabled_tools)
+                    enabled_tools=params.enabled_tools,
+                    knowledge_collection_ids=params.knowledge_collection_ids)
                 self.output(OrchestrationRoute(run_id=params.run_id, sequence=1,
                     agent_ids=params.agent_ids, reason=reason, planned_model_calls=planned,
                     max_model_calls=params.max_model_calls, max_output_tokens=params.max_output_tokens,

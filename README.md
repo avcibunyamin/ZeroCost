@@ -37,7 +37,7 @@ Windows'ta Python komutu `.venv\Scripts\python.exe` olur. Node yardımcı betikl
 - Kullanıcının seçtiği en fazla 10 çalışma alanı dosyasını çoklu ajan bağlamına ekleme.
 - Yerel Ollama embedding modeli keşfi, bilgi koleksiyonları ve SQLite FTS5/float32 vektör depolama temeli.
 
-Claude ve Gemini akışlı sohbet adaptörleri ve Rust yönetiminde OS anahtar kasası eklendi. Faz 2'nin çoklu ajan, otomatik router, yürütme bütçesi, kontrollü çalışma alanı yazması ve terminal dilimi çalışır. RAG'ın veri, embedding, bağlam duyarlı belge parçalama ve kaynak ekleme hattı hazırdır; ajan arama aracı henüz uygulanmadı. Bu sürüm üretime hazır değildir.
+Claude ve Gemini akışlı sohbet adaptörleri ve Rust yönetiminde OS anahtar kasası eklendi. Faz 2'nin çoklu ajan, otomatik router, yürütme bütçesi, kontrollü çalışma alanı yazması ve terminal dilimi çalışır. RAG'ın veri, embedding, bağlam duyarlı belge parçalama, kaynak ekleme ve kaynak gösteren hibrit ajan arama hattı hazırdır. Bu sürüm üretime hazır değildir.
 
 ## Bulut bağlantısı ve anahtar kasası
 
@@ -75,7 +75,7 @@ Entegrasyon referansları: [keyring](https://docs.rs/keyring/3.6.3/keyring/), [A
 
 **Bilgi yönetimi** ekranı Ollama'nın embedding yeteneği bildiren kurulu modellerini keşfeder. Koleksiyon oluşturulurken `/api/embed` ile yerel bir boyut probu yapılır; dönen vektör doğrulanır, L2 normalize edilir ve koleksiyonun model/boyut sözleşmesi SQLite'a kaydedilir. Ollama erişilemez olsa da önceden kaydedilmiş koleksiyonlar görüntülenir. API anahtarı veya ücretli bulut çağrısı kullanılmaz.
 
-SQLite şema v9; koleksiyon, kaynak ve parça tablolarını, Unicode FTS5 tam metin indeksini ve küçük endian float32 embedding BLOB'larını içerir. Belgenin tam UTF-8 içeriği ve her chunk SHA-256 ile özetlenir. Aynı içerik ve indeks sürümü tekrar işlendiğinde embedding çağrısı yapılmaz; belge değiştiğinde koleksiyon içindeki aynı chunk vektörleri yeniden kullanılır ve yalnız benzersiz yeni parçalar 32'lik partilerle embed edilir. Sürümlü chunk hash alanı, ileride ayrıştırma/embedding girdisi değiştiğinde eski cache'i güvenle geçersiz kılar. Kaynak yenileme aynı koleksiyon/workspace/yol anahtarında transaction içinde eskisini değiştirir; vektör boyutu uyuşmazlığı reddedilir. Bu taşınabilir temel harici bir vektör veritabanı gerektirmez. Hibrit sıralama ve ajan `knowledge.search` aracı sonraki dilimin kapsamındadır.
+SQLite şema v10; koleksiyon, kaynak ve parça tablolarını, Unicode FTS5 tam metin indeksini ve küçük endian float32 embedding BLOB'larını içerir. Belgenin tam UTF-8 içeriği ve her chunk SHA-256 ile özetlenir. Aynı içerik ve indeks sürümü tekrar işlendiğinde embedding çağrısı yapılmaz; belge değiştiğinde koleksiyon içindeki aynı chunk vektörleri yeniden kullanılır ve yalnız benzersiz yeni parçalar 32'lik partilerle embed edilir. Sürümlü chunk hash alanı, ileride ayrıştırma/embedding girdisi değiştiğinde eski cache'i güvenle geçersiz kılar. Kaynak yenileme aynı koleksiyon/workspace/yol anahtarında transaction içinde eskisini değiştirir; vektör boyutu uyuşmazlığı reddedilir. Bu taşınabilir temel harici bir vektör veritabanı gerektirmez.
 
 Metin ve Markdown ayrıştırıcısı CRLF/CR satır sonlarını deterministik biçimde normalize eder; kaynak satır numaralarını koruyarak başlık, paragraf, liste, tablo, alıntı, fenced code ve YAML frontmatter blokları üretir. ATX/Setext başlıkları ile başlık hiyerarşisi korunur; code içindeki Markdown işaretleri ayrıştırılmaz. Girdi NUL, 1.000.000 karakter ve 50.000 satır sınırlarıyla çevrelenir.
 
@@ -92,6 +92,10 @@ Birleşik chunk hattı semantik paketleme, oversized düz metin bölme, fenced-c
 İndeksleme sürerken `knowledge_ingestion_progress` olayları okuma, ayrıştırma, chunking, embedding partileri, SQLite transaction ve tamamlanma aşamalarını bildirir. Her olay istek kimliği, monoton sıra numarası, ölçülen tamamlanan/toplam iş birimi ve 0–100 ilerleme değeri taşır. Rust yalnız izin verilen olay türlerini renderer'a geçirir; React çalışma zamanı şemasını doğrular, eski sıra numaralarını yok sayar ve erişilebilir progress bar'ı günceller.
 
 Bilgi yönetimi ekranındaki native dosya seçici ve Tauri webview sürükle-bırak olayı, yalnız seçili kayıtlı çalışma alanının içindeki `.txt`/Markdown belgelerini en fazla 10 dosyalık kuyruğa alır. Mutlak yol UI'da çalışma alanına göreli hale getirilir; renderer dosya içeriğini okumaz. Kuyruk sıralı çalışır, her dosyanın progress olayları istek kimliğiyle ayrılır ve başarılı öğeler kuyruktan çıkarılır. Sonuç ekranı yeni embedding, yeniden kullanılan parça ve değişmemiş belge sayılarını gösterir.
+
+`knowledge.search`, sorguyu koleksiyonun kayıtlı Ollama modeliyle embed eder ve aynı anda güvenli biçimde oluşturulmuş FTS5 sorgusunu çalıştırır. Cosine sırası ile BM25 sırası `k=60` Reciprocal Rank Fusion kullanılarak ağırlık ayarı gerektirmeden birleştirilir. Sonuçlar chunk kimliği, koleksiyon, workspace, kaynak yolu ve özgün satır aralığını taşır. Yerel brute-force vektör taraması koleksiyon başına 50.000 chunk ile, aday listeleri 20 ve nihai sonuçlar 10 ile sınırlıdır; bozuk veya boyutu uyuşmayan vektör kapalı davranışla reddedilir.
+
+Ajan masasında en fazla üç bilgi koleksiyonu açıkça seçilebilir. Koordinatör bir `knowledge.search` zarfı üretirse salt-okunur araç kullanıcı onayı beklemeden çalışır ve sonuç ikinci sentez çağrısına geri verilir. Bu olası ek çağrı model çağrısı ve fiat maliyet üst sınırına baştan dahil edilir. Belge içeriği XML ayraçlarını taklit edemeyecek biçimde escape edilir, `<document>` zarflarında güvenilmeyen veri olarak işaretlenir ve nihai yanıtta `kaynak:satır-satır` referansları korunur. Mutasyon araçlarının ayrı onay akışı değişmez.
 
 Embedding API sözleşmesi: [Ollama Embeddings](https://docs.ollama.com/capabilities/embeddings) ve [Ollama `/api/embed`](https://docs.ollama.com/api/embed).
 
@@ -143,7 +147,6 @@ macOS uygulaması `src-tauri/target/release/bundle/macos/ZeroCost.app` altında 
 
 ## Sonraki geliştirme dilimi
 
-1. Koleksiyonlarda hibrit FTS + cosine arama, RRF birleştirme ve kaynak referanslı `knowledge.search` ajan aracı.
-2. Skill paket manifesti, sürümleme ve izin beyanları.
-3. Kesilmiş üretim düğümünü kontrollü yeniden deneme ve kısmi görev devamı.
-4. Sağlayıcı cache/batch tarifeleri ve kullanıcıya özel fiyat profilleri.
+1. Skill paket manifesti, sürümleme ve izin beyanları.
+2. Kesilmiş üretim düğümünü kontrollü yeniden deneme ve kısmi görev devamı.
+3. Sağlayıcı cache/batch tarifeleri ve kullanıcıya özel fiyat profilleri.

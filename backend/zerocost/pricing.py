@@ -80,19 +80,24 @@ def cost_microusd(provider: str, model_id: str, usage: TokenUsage) -> int:
 
 
 def estimate_plan(snapshot, agent_ids: list[str], rounds: int, objective: str,
-                  context_bytes: int, max_output_tokens: int) -> int:
+                  context_bytes: int, max_output_tokens: int,
+                  extra_synthesis: bool = False) -> int:
     agents = {agent.id: agent for agent in snapshot.agents}
     connections = {connection.id: connection for connection in snapshot.connections}
     sequence = agent_ids * rounds + [agent_ids[0]]
+    if extra_synthesis:
+        sequence.append(agent_ids[0])
     transcript_tokens = 0
     total = 0
     objective_bytes = len(objective.encode('utf-8'))
-    for agent_id in sequence:
+    for index, agent_id in enumerate(sequence):
         agent = agents[agent_id]
         connection = connections[agent.connection_id]
         # UTF-8 byte count is deliberately conservative for text tokenization.
         input_bound = (objective_bytes + context_bytes + transcript_tokens +
                        len(agent.role.encode()) + len(agent.instructions.encode()) + 2048)
+        if extra_synthesis and index == len(sequence) - 1:
+            input_bound += 40_000
         total += cost_microusd(connection.provider, connection.model_id,
                               TokenUsage(input_bound, max_output_tokens))
         transcript_tokens += max_output_tokens

@@ -9,7 +9,7 @@ import struct
 from uuid import uuid4
 from .models import Agent, AgentInput, Connection, ConnectionInput, Snapshot, Workspace, WorkspaceInput
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 class Store:
@@ -209,6 +209,15 @@ class Store:
                 COMMIT;
             """)
 
+        if current < 10:
+            with self.db:
+                columns = {row['name'] for row in self.db.execute(
+                    "PRAGMA table_info(orchestration_runs)")}
+                if 'knowledge_collection_ids' not in columns:
+                    self.db.execute("""ALTER TABLE orchestration_runs ADD COLUMN
+                        knowledge_collection_ids TEXT NOT NULL DEFAULT '[]'""")
+                self.db.execute("PRAGMA user_version=10")
+
     def close(self):
         self.db.close()
 
@@ -350,10 +359,31 @@ class Store:
         return source_id
 
     def search_knowledge_fts(self, collection_id: str, query: str, limit: int = 10):
-        return [dict(row) for row in self.db.execute("""SELECT chunk_id,source_path,content,
-                bm25(knowledge_chunks_fts) AS score FROM knowledge_chunks_fts
-            WHERE knowledge_chunks_fts MATCH ? AND collection_id=? ORDER BY score LIMIT ?""",
+        return [dict(row) for row in self.db.execute("""SELECT f.chunk_id,f.source_path,f.content,
+                k.ordinal,k.start_line,k.end_line,s.workspace_id,c.name AS collection_name,
+                bm25(knowledge_chunks_fts) AS score
+            FROM knowledge_chunks_fts AS f
+            JOIN knowledge_chunks AS k ON k.id=f.chunk_id
+            JOIN knowledge_sources AS s ON s.id=k.source_id
+            JOIN knowledge_collections AS c ON c.id=s.collection_id
+            WHERE knowledge_chunks_fts MATCH ? AND f.collection_id=? ORDER BY score,f.chunk_id LIMIT ?""",
             (query, collection_id, min(max(limit, 1), 20)))]
+
+    def knowledge_vector_rows(self, collection_id: str, maximum: int = 50_000):
+        collection = self.knowledge_collection(collection_id)
+        if collection is None:
+            raise ValueError('Bilgi koleksiyonu bulunamadı.')
+        count = self.db.execute("""SELECT COUNT(*) FROM knowledge_chunks k
+            JOIN knowledge_sources s ON s.id=k.source_id WHERE s.collection_id=?""",
+            (collection_id,)).fetchone()[0]
+        if count > maximum:
+            raise ValueError('Koleksiyon yerel vektör arama sınırını aşıyor.')
+        rows = self.db.execute("""SELECT k.id AS chunk_id,k.ordinal,k.start_line,k.end_line,
+                k.content,k.embedding,s.workspace_id,s.path AS source_path,c.name AS collection_name
+            FROM knowledge_chunks k JOIN knowledge_sources s ON s.id=k.source_id
+            JOIN knowledge_collections c ON c.id=s.collection_id
+            WHERE s.collection_id=? ORDER BY k.id""", (collection_id,))
+        return collection, rows
 
     def history(self, agent_id: str):
         from .models import ChatHistory, ChatTurn
@@ -380,16 +410,19 @@ class Store:
                             estimated_max_cost_microusd: int = 0,
                             price_catalog_version: str = '2026-09-09', workspace_id: str | None = None,
                             context_paths: list[str] | None = None,
-                            enabled_tools: list[str] | None = None):
+                            enabled_tools: list[str] | None = None,
+                            knowledge_collection_ids: list[str] | None = None):
         with self.db:
             self.db.execute("""INSERT INTO orchestration_runs
                 (run_id,objective,rounds,status,routing_mode,route_reason,max_model_calls,
                  max_output_tokens,workspace_id,context_paths,max_cost_microusd,
-                 estimated_max_cost_microusd,price_catalog_version,enabled_tools)
-                VALUES (?,?,?,'running',?,?,?,?,?,?,?,?,?,?)""",
+                 estimated_max_cost_microusd,price_catalog_version,enabled_tools,
+                 knowledge_collection_ids)
+                VALUES (?,?,?,'running',?,?,?,?,?,?,?,?,?,?,?)""",
                 (run_id, objective, rounds, routing_mode, route_reason, max_model_calls,
                  max_output_tokens, workspace_id, json.dumps(context_paths or []), max_cost_microusd,
-                 estimated_max_cost_microusd, price_catalog_version, json.dumps(enabled_tools or [])))
+                 estimated_max_cost_microusd, price_catalog_version, json.dumps(enabled_tools or []),
+                 json.dumps(knowledge_collection_ids or [])))
             self.db.executemany("INSERT INTO orchestration_participants VALUES (?,?,?)",
                                 [(run_id, agent_id, position) for position, agent_id in enumerate(agent_ids)])
 
@@ -423,7 +456,9 @@ class Store:
         return dict(row)
 
     def set_tool_action(self, run_id: str, proposal: dict, status: str = 'waiting', result: str = ''):
-        public = {key: proposal.get(key) for key in ('tool', 'path', 'command', 'cwd', 'workspace_id', 'agent_id')}
+        public = {key: proposal.get(key) for key in (
+            'tool', 'path', 'command', 'cwd', 'workspace_id', 'agent_id',
+            'collection_id', 'query', 'limit')}
         with self.db:
             self.db.execute("""UPDATE orchestration_runs SET tool_name=?,tool_request=?,
                 tool_preview=?,tool_risk=?,tool_status=?,tool_result=? WHERE run_id=?""",
@@ -447,7 +482,8 @@ class Store:
         agent_ids = [item[0] for item in self.db.execute(
             "SELECT agent_id FROM orchestration_participants WHERE run_id=? ORDER BY position", (run_id,))]
         return {**dict(row), 'agent_ids': agent_ids, 'context_paths': json.loads(row['context_paths']),
-                'enabled_tools': json.loads(row['enabled_tools'])}
+                'enabled_tools': json.loads(row['enabled_tools']),
+                'knowledge_collection_ids': json.loads(row['knowledge_collection_ids'])}
 
     def waiting_orchestration(self):
         row = self.db.execute("""SELECT run_id FROM orchestration_runs
@@ -469,7 +505,9 @@ class Store:
                 request = json.loads(row['tool_request'])
                 tool_action = ToolAction(tool=row['tool_name'], path=request.get('path') or '',
                     command=request.get('command') or [], preview=row['tool_preview'],
-                    risk=row['tool_risk'], status=row['tool_status'], result=row['tool_result'])
+                    collection_id=request.get('collection_id') or '', query=request.get('query') or '',
+                    limit=request.get('limit') or 5, risk=row['tool_risk'],
+                    status=row['tool_status'], result=row['tool_result'])
             runs.append(OrchestrationRun(run_id=row['run_id'], objective=row['objective'], rounds=row['rounds'],
                                          status=row['status'], error=row['error'], agent_ids=agent_ids,
                                          routing_mode=row['routing_mode'], route_reason=row['route_reason'],
@@ -484,5 +522,6 @@ class Store:
                                          workspace_id=row['workspace_id'],
                                          context_paths=json.loads(row['context_paths']),
                                          enabled_tools=json.loads(row['enabled_tools']),
+                                         knowledge_collection_ids=json.loads(row['knowledge_collection_ids']),
                                          tool_action=tool_action, messages=messages))
         return OrchestrationHistory(runs=runs)

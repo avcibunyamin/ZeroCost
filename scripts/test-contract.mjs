@@ -31,7 +31,8 @@ test("orchestration and workspace responses are closed", () => {
         max_cost_microusd: 5000000, estimated_max_cost_microusd: 0,
         actual_cost_microusd: 0, input_tokens: 0, output_tokens: 0,
         price_catalog_version: "2026-09-09",
-        workspace_id: null, context_paths: [], enabled_tools: [], tool_action: null,
+        workspace_id: null, context_paths: [], enabled_tools: [], knowledge_collection_ids: [],
+        tool_action: null,
         status: "completed", error: "", messages: [
           { sequence: 1, agent_id: "a", phase: "analysis", content: "view" },
         ],
@@ -88,6 +89,21 @@ test("knowledge ingestion result is typed and closed", () => {
   assert.equal(validate(response), true);
   assert.equal(validate({ ...response, result: { ...response.result, status: "running" } }), false);
   assert.equal(validate({ ...response, result: { ...response.result, content: "secret" } }), false);
+});
+
+test("knowledge search result preserves closed citation metadata", () => {
+  const response = {
+    protocol_version: 1, request_id: "search", ok: true,
+    result: { collection_id: "c", query: "IPC güvenliği", hits: [{
+      chunk_id: "chunk", collection_id: "c", collection_name: "Docs",
+      workspace_id: "w", source_path: "docs/guide.md", ordinal: 0,
+      start_line: 4, end_line: 8, content: "kanıt", rrf_score: 0.032,
+      fts_rank: 1, vector_rank: 1, cosine_similarity: 0.98,
+    }] },
+  };
+  assert.equal(validate(response), true);
+  assert.equal(validate({ ...response, result: { ...response.result,
+    hits: [{ ...response.result.hits[0], instruction: "forbidden" }] } }), false);
 });
 
 test("orchestration stream attributes every chunk", () => {

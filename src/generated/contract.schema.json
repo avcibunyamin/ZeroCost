@@ -839,6 +839,201 @@
       "title": "KnowledgeIngestionResult",
       "type": "object"
     },
+    "KnowledgeSearchHit": {
+      "additionalProperties": false,
+      "properties": {
+        "chunk_id": {
+          "title": "Chunk Id",
+          "type": "string"
+        },
+        "collection_id": {
+          "title": "Collection Id",
+          "type": "string"
+        },
+        "collection_name": {
+          "title": "Collection Name",
+          "type": "string"
+        },
+        "workspace_id": {
+          "title": "Workspace Id",
+          "type": "string"
+        },
+        "source_path": {
+          "title": "Source Path",
+          "type": "string"
+        },
+        "ordinal": {
+          "title": "Ordinal",
+          "type": "integer"
+        },
+        "start_line": {
+          "title": "Start Line",
+          "type": "integer"
+        },
+        "end_line": {
+          "title": "End Line",
+          "type": "integer"
+        },
+        "content": {
+          "maxLength": 3200,
+          "title": "Content",
+          "type": "string"
+        },
+        "rrf_score": {
+          "minimum": 0,
+          "title": "Rrf Score",
+          "type": "number"
+        },
+        "fts_rank": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fts Rank"
+        },
+        "vector_rank": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vector Rank"
+        },
+        "cosine_similarity": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": -1,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cosine Similarity"
+        }
+      },
+      "required": [
+        "chunk_id",
+        "collection_id",
+        "collection_name",
+        "workspace_id",
+        "source_path",
+        "ordinal",
+        "start_line",
+        "end_line",
+        "content",
+        "rrf_score",
+        "fts_rank",
+        "vector_rank",
+        "cosine_similarity"
+      ],
+      "title": "KnowledgeSearchHit",
+      "type": "object"
+    },
+    "KnowledgeSearchInput": {
+      "additionalProperties": false,
+      "properties": {
+        "collection_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Collection Id",
+          "type": "string"
+        },
+        "query": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "limit": {
+          "default": 5,
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "collection_id",
+        "query",
+        "limit"
+      ],
+      "title": "KnowledgeSearchInput",
+      "type": "object"
+    },
+    "KnowledgeSearchRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "knowledge.search",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/KnowledgeSearchInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "KnowledgeSearchRequest",
+      "type": "object"
+    },
+    "KnowledgeSearchResult": {
+      "additionalProperties": false,
+      "properties": {
+        "collection_id": {
+          "title": "Collection Id",
+          "type": "string"
+        },
+        "query": {
+          "title": "Query",
+          "type": "string"
+        },
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/KnowledgeSearchHit"
+          },
+          "maxItems": 10,
+          "title": "Hits",
+          "type": "array"
+        }
+      },
+      "required": [
+        "collection_id",
+        "query",
+        "hits"
+      ],
+      "title": "KnowledgeSearchResult",
+      "type": "object"
+    },
     "KnowledgeSnapshot": {
       "additionalProperties": false,
       "properties": {
@@ -1137,7 +1332,8 @@
             {
               "enum": [
                 "workspace.write",
-                "terminal.execute"
+                "terminal.execute",
+                "knowledge.search"
               ],
               "type": "string"
             },
@@ -1713,6 +1909,13 @@
           "title": "Enabled Tools",
           "type": "array"
         },
+        "knowledge_collection_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Knowledge Collection Ids",
+          "type": "array"
+        },
         "tool_action": {
           "anyOf": [
             {
@@ -1766,6 +1969,7 @@
         "workspace_id",
         "context_paths",
         "enabled_tools",
+        "knowledge_collection_ids",
         "tool_action",
         "status",
         "error",
@@ -1818,7 +2022,7 @@
         },
         "max_model_calls": {
           "default": 5,
-          "maximum": 13,
+          "maximum": 14,
           "minimum": 3,
           "title": "Max Model Calls",
           "type": "integer"
@@ -1872,6 +2076,16 @@
           "maxItems": 2,
           "title": "Enabled Tools",
           "type": "array"
+        },
+        "knowledge_collection_ids": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 3,
+          "title": "Knowledge Collection Ids",
+          "type": "array"
         }
       },
       "required": [
@@ -1885,7 +2099,8 @@
         "max_cost_microusd",
         "workspace_id",
         "context_paths",
-        "enabled_tools"
+        "enabled_tools",
+        "knowledge_collection_ids"
       ],
       "title": "OrchestrationStartInput",
       "type": "object"
@@ -1948,7 +2163,8 @@
         "tool": {
           "enum": [
             "workspace.write",
-            "terminal.execute"
+            "terminal.execute",
+            "knowledge.search"
           ],
           "title": "Tool",
           "type": "string"
@@ -2436,6 +2652,9 @@
             },
             {
               "$ref": "#/$defs/KnowledgeIngestionResult"
+            },
+            {
+              "$ref": "#/$defs/KnowledgeSearchResult"
             }
           ],
           "title": "Result"
@@ -2456,7 +2675,8 @@
         "tool": {
           "enum": [
             "workspace.write",
-            "terminal.execute"
+            "terminal.execute",
+            "knowledge.search"
           ],
           "title": "Tool",
           "type": "string"
@@ -2472,6 +2692,23 @@
           },
           "title": "Command",
           "type": "array"
+        },
+        "collection_id": {
+          "default": "",
+          "title": "Collection Id",
+          "type": "string"
+        },
+        "query": {
+          "default": "",
+          "title": "Query",
+          "type": "string"
+        },
+        "limit": {
+          "default": 5,
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
         },
         "preview": {
           "default": "",
@@ -2507,6 +2744,9 @@
         "tool",
         "path",
         "command",
+        "collection_id",
+        "query",
+        "limit",
         "preview",
         "risk",
         "status",
@@ -2906,6 +3146,7 @@
           "chat.start": "#/$defs/ChatStartRequest",
           "connection.create": "#/$defs/ConnectionRequest",
           "knowledge.collection.create": "#/$defs/KnowledgeCollectionCreateRequest",
+          "knowledge.search": "#/$defs/KnowledgeSearchRequest",
           "knowledge.snapshot": "#/$defs/KnowledgeSnapshotRequest",
           "knowledge.source.ingest": "#/$defs/KnowledgeSourceIngestRequest",
           "ollama.models": "#/$defs/ModelsRequest",
@@ -2982,6 +3223,9 @@
         },
         {
           "$ref": "#/$defs/KnowledgeSourceIngestRequest"
+        },
+        {
+          "$ref": "#/$defs/KnowledgeSearchRequest"
         }
       ],
       "title": "Request"

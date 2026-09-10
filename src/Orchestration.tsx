@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Bot, LoaderCircle, Play, ShieldCheck, Square, Users } from "lucide-react";
+import { BookOpen, Bot, LoaderCircle, Play, ShieldCheck, Square, Users } from "lucide-react";
 import { desktopAvailable, rpc } from "./api";
 import validateEvent from "./generated/validate-event.js";
 import type {
   OrchestrationMessage,
   OrchestrationRun,
   OrchestrationStartInput,
+  KnowledgeCollection,
   PricingCatalog,
   Snapshot,
 } from "./generated/contract";
@@ -39,6 +40,8 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
   const [workspaceId, setWorkspaceId] = useState("");
   const [contextInput, setContextInput] = useState("");
   const [enabledTools, setEnabledTools] = useState<("workspace.write" | "terminal.execute")[]>([]);
+  const [knowledgeCollections, setKnowledgeCollections] = useState<KnowledgeCollection[]>([]);
+  const [selectedKnowledge, setSelectedKnowledge] = useState<string[]>([]);
   const [runs, setRuns] = useState<OrchestrationRun[]>([]);
   const [catalog, setCatalog] = useState<PricingCatalog | null>(null);
   const [streaming, setStreaming] = useState<StreamingMessage | null>(null);
@@ -60,7 +63,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       runId.current = pending.run_id;
       setActive(true);
       if (pending.status === "waiting_approval" && pending.workspace_id)
-        setApproval(pending.tool_action ? {
+        setApproval(pending.tool_action && pending.tool_action.tool !== "knowledge.search" ? {
           permission: pending.tool_action.tool,
           workspaceId: pending.workspace_id,
           paths: [], tool: pending.tool_action.tool,
@@ -77,6 +80,11 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       void rpc({ method: "pricing.catalog" })
         .then((result) => {
           if ("currency" in result) setCatalog(result);
+        })
+        .catch((e) => setError(String(e)));
+      void rpc({ method: "knowledge.snapshot" })
+        .then((result) => {
+          if ("collections" in result) setKnowledgeCollections(result.collections);
         })
         .catch((e) => setError(String(e)));
     }
@@ -188,8 +196,12 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
           ),
         );
       } else if (payload.type === "orchestration_tool_result") {
-        setRuns((items) => items.map((run) => run.run_id === payload.run_id && run.tool_action
-          ? { ...run, tool_action: { ...run.tool_action, status: payload.status, result: payload.result } }
+        setRuns((items) => items.map((run) => run.run_id === payload.run_id
+          ? { ...run, tool_action: run.tool_action
+            ? { ...run.tool_action, status: payload.status, result: payload.result }
+            : { tool: payload.tool, path: "", command: [], collection_id: "", query: "",
+                limit: 5, preview: "", risk: "medium", status: payload.status,
+                result: payload.result } }
           : run));
       } else {
         if (payload.type === "orchestration_error") setError(payload.message);
@@ -249,6 +261,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       workspace_id: workspaceId || null,
       context_paths: contextPaths,
       enabled_tools: enabledTools,
+      knowledge_collection_ids: selectedKnowledge,
       tool_action: null,
       status: "running",
       error: "",
@@ -275,6 +288,8 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
           context_paths:
             contextPaths as OrchestrationStartInput["context_paths"],
           enabled_tools: enabledTools as OrchestrationStartInput["enabled_tools"],
+          knowledge_collection_ids:
+            selectedKnowledge as OrchestrationStartInput["knowledge_collection_ids"],
         },
       });
     } catch (e) {
@@ -394,6 +409,22 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               </label>
             ))}
           </fieldset>
+          {knowledgeCollections.length > 0 && <fieldset disabled={active}>
+            <legend>Yerel bilgi koleksiyonları</legend>
+            {knowledgeCollections.map((collection) => (
+              <label className="agent-choice" key={collection.id}>
+                <input type="checkbox" checked={selectedKnowledge.includes(collection.id)}
+                  onChange={() => setSelectedKnowledge((current) => current.includes(collection.id)
+                    ? current.filter((id) => id !== collection.id)
+                    : current.length < 3 ? [...current, collection.id] : current)} />
+                <BookOpen size={16} />
+                <span><strong>{collection.name}</strong>
+                  <small>{collection.source_count} belge · salt okunur hibrit arama</small></span>
+              </label>
+            ))}
+            <small>En fazla 3 koleksiyon. Ajan arama isterse bir ek sentez çağrısı bütçelenir;
+              bulut ajanında bulunan metin ilgili sağlayıcıya gönderilir.</small>
+          </fieldset>}
           <label>
             Yönlendirme
             <select
@@ -413,7 +444,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               <input
                 type="number"
                 min={3}
-                max={13}
+                max={14}
                 value={maxModelCalls}
                 onChange={(e) => setMaxModelCalls(Number(e.target.value))}
                 disabled={active}
@@ -566,8 +597,8 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
                 selected.length < 2 ||
                 !objective.trim() ||
                 (routingMode === "manual" &&
-                  maxModelCalls < selected.length * rounds + 1) ||
-                maxModelCalls < rounds * 2 + 1 ||
+                  maxModelCalls < selected.length * rounds + 1 + (selectedKnowledge.length ? 1 : 0)) ||
+                maxModelCalls < rounds * 2 + 1 + (selectedKnowledge.length ? 1 : 0) ||
                 !Number.isFinite(maxCostUsd) ||
                 maxCostUsd < 0 ||
                 maxCostUsd > 1000 ||

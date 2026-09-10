@@ -18,6 +18,8 @@ type EventSink = Arc<dyn Fn(Value) + Send + Sync>;
 fn response_timeout_seconds(request: &Value, ready: bool) -> u64 {
     if request["method"].as_str() == Some("knowledge.source.ingest") {
         305
+    } else if request["method"].as_str() == Some("knowledge.search") {
+        95
     } else if ready {
         15
     } else {
@@ -457,6 +459,10 @@ mod tests {
         assert_eq!(
             response_timeout_seconds(&json!({"method":"knowledge.source.ingest"}), true),
             305
+        );
+        assert_eq!(
+            response_timeout_seconds(&json!({"method":"knowledge.search"}), true),
+            95
         );
         assert_eq!(
             response_timeout_seconds(&json!({"method":"snapshot"}), true),

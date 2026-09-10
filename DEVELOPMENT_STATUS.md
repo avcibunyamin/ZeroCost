@@ -198,3 +198,17 @@ Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırıl
 - Yeni embedding, yeniden kullanılan parça ve değişmemiş belge sonuç sayaçları
 - Renderer'a dosya okuma izni vermeyen yalnızca `dialog:allow-open` Tauri capability'si
 - 89 Python, 11 JavaScript sözleşme ve 2 etkin Rust testi geçti
+
+## Faz 3 · Hibrit bilgi araması ve ajan aracı
+
+- Aynı sorgu için paralel mantıkta FTS5 BM25 ve yerel cosine sıralaması
+- Ayar gerektirmeyen `k=60` Reciprocal Rank Fusion ve deterministik eşitlik çözümü
+- Koleksiyon başına 50.000 vektör, 20 aday ve 10 sonuç üst sınırı
+- Chunk, koleksiyon, workspace, kaynak yolu ve satır aralığı provenance bilgisi
+- Kapalı Pydantic → TypeScript `knowledge.search` IPC sözleşmesi
+- Ajan masasında en fazla üç koleksiyon seçimi ve salt-okunur araç çağrısı
+- Arama sonucunu kaynaklı ikinci senteze döndüren LangGraph dalı
+- Ek sentezi model çağrısı ve ihtiyatlı fiat maliyet bütçesine dahil etme
+- Escape edilmiş `<document>` zarfları ve açık prompt-injection veri sınırı
+- SQLite v10 ile görevde seçilen koleksiyonları kalıcı saklama
+- 95 Python, 12 JavaScript sözleşme ve 2 etkin Rust testi geçti

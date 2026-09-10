@@ -6,7 +6,8 @@ Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=128)]
 Provider = Literal["ollama", "lmstudio", "anthropic", "gemini", "openai"]
 Permission = Literal["workspace.read", "workspace.write", "terminal.execute"]
-ToolName = Literal["workspace.write", "terminal.execute"]
+MutationToolName = Literal["workspace.write", "terminal.execute"]
+ToolName = Literal["workspace.write", "terminal.execute", "knowledge.search"]
 
 
 class Model(BaseModel):
@@ -281,14 +282,15 @@ class OrchestrationStartInput(Model):
     agent_ids: list[Identifier] = Field(min_length=2, max_length=4)
     rounds: int = Field(default=1, ge=1, le=3)
     routing_mode: RoutingMode = "manual"
-    max_model_calls: int = Field(default=5, ge=3, le=13)
+    max_model_calls: int = Field(default=5, ge=3, le=14)
     max_output_tokens: int = Field(default=512, ge=128, le=4096)
     max_cost_microusd: int = Field(default=5_000_000, ge=0, le=1_000_000_000)
     workspace_id: Identifier | None = None
     context_paths: list[Annotated[str, StringConstraints(min_length=1, max_length=4096)]] = Field(
         default_factory=list, max_length=10
     )
-    enabled_tools: list[ToolName] = Field(default_factory=list, max_length=2)
+    enabled_tools: list[MutationToolName] = Field(default_factory=list, max_length=2)
+    knowledge_collection_ids: list[Identifier] = Field(default_factory=list, max_length=3)
 
     @field_validator("agent_ids")
     @classmethod
@@ -306,14 +308,22 @@ class OrchestrationStartInput(Model):
 
     @field_validator("enabled_tools")
     @classmethod
-    def unique_tools(cls, value: list[ToolName]) -> list[ToolName]:
+    def unique_tools(cls, value: list[MutationToolName]) -> list[MutationToolName]:
         if len(value) != len(set(value)):
             raise ValueError("Duplicate tool")
         return value
 
+    @field_validator("knowledge_collection_ids")
+    @classmethod
+    def unique_knowledge_collections(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("Duplicate knowledge collection")
+        return value
+
     @model_validator(mode="after")
     def budget_covers_minimum_team(self):
-        if self.max_model_calls < self.rounds * 2 + 1:
+        minimum_calls = self.rounds * 2 + 1 + bool(self.knowledge_collection_ids)
+        if self.max_model_calls < minimum_calls:
             raise ValueError("Model çağrısı bütçesi iki ajan ve sentez için yetersiz")
         if self.context_paths and not self.workspace_id:
             raise ValueError("Bağlam dosyaları için çalışma alanı gerekli")
@@ -451,6 +461,39 @@ class KnowledgeIngestionProgress(Model):
         return self
 
 
+class KnowledgeSearchInput(Model):
+    collection_id: Identifier
+    query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+    limit: int = Field(default=5, ge=1, le=10)
+
+
+class KnowledgeSearchRequest(RequestBase):
+    method: Literal["knowledge.search"]
+    params: KnowledgeSearchInput
+
+
+class KnowledgeSearchHit(Model):
+    chunk_id: str
+    collection_id: str
+    collection_name: str
+    workspace_id: str
+    source_path: str
+    ordinal: int
+    start_line: int
+    end_line: int
+    content: Annotated[str, StringConstraints(max_length=3200)]
+    rrf_score: float = Field(ge=0)
+    fts_rank: int | None = Field(default=None, ge=1)
+    vector_rank: int | None = Field(default=None, ge=1)
+    cosine_similarity: float | None = Field(default=None, ge=-1, le=1)
+
+
+class KnowledgeSearchResult(Model):
+    collection_id: str
+    query: str
+    hits: list[KnowledgeSearchHit] = Field(max_length=10)
+
+
 class OrchestrationMessage(Model):
     sequence: int
     agent_id: str
@@ -462,6 +505,9 @@ class ToolAction(Model):
     tool: ToolName
     path: str = ""
     command: list[str] = Field(default_factory=list)
+    collection_id: str = ""
+    query: str = ""
+    limit: int = Field(default=5, ge=1, le=10)
     preview: str = ""
     risk: Literal["medium", "high"]
     status: Literal["waiting", "approved", "rejected", "completed", "failed"]
@@ -486,7 +532,8 @@ class OrchestrationRun(Model):
     price_catalog_version: str
     workspace_id: str | None
     context_paths: list[str]
-    enabled_tools: list[ToolName]
+    enabled_tools: list[MutationToolName]
+    knowledge_collection_ids: list[str]
     tool_action: ToolAction | None
     status: OrchestrationStatus
     error: str
@@ -598,7 +645,8 @@ Request = Annotated[Union[SnapshotRequest, ConnectionRequest, AgentRequest, Work
                          OrchestrationApprovalRequest, OrchestrationHistoryRequest,
                          PricingCatalogRequest, KnowledgeSnapshotRequest,
                          KnowledgeCollectionCreateRequest,
-                         KnowledgeSourceIngestRequest], Field(discriminator="method")]
+                         KnowledgeSourceIngestRequest, KnowledgeSearchRequest],
+                        Field(discriminator="method")]
 
 
 class Success(Model):
@@ -607,7 +655,8 @@ class Success(Model):
     ok: Literal[True] = True
     result: Union[Snapshot, OllamaModels, ChatHistory, Accepted, VaultStatus,
                   WorkspaceListing, WorkspaceFile, OrchestrationHistory,
-                  PricingCatalog, KnowledgeSnapshot, KnowledgeIngestionResult]
+                  PricingCatalog, KnowledgeSnapshot, KnowledgeIngestionResult,
+                  KnowledgeSearchResult]
 
 
 Response = Union[Success, Failure]
