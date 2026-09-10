@@ -151,3 +151,12 @@ Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırıl
 - Her alt parçada özgün başlangıç/bitiş satırı ve başlık yolu
 - Code içeren chunk'ları ayrı kod bölücüsüne değiştirmeden aktarma
 - 72 Python ve 9 JavaScript sözleşme testi geçti
+
+## Faz 3 · Oversized code bölme
+
+- Her parçada özgün backtick/tilde fence ve dil etiketini yeniden açıp kapatma
+- Boş satır ve üst seviye bildirim öncelikli, ardından satır sınırında bölme
+- İlk code parçasında frontmatter/başlık bağlamını koruma
+- Kapanmamış fence'i tamamlama; tek minified satırda kayıpsız karakter fallback'i
+- Parça başına katı azami boyut ve özgün kaynak satırı provenance bilgisi
+- 76 Python ve 9 JavaScript sözleşme testi geçti

@@ -1,6 +1,7 @@
 import pytest
 
-from zerocost.chunking import merge_semantic_blocks, split_oversized_text
+from zerocost.chunking import (SemanticChunk, merge_semantic_blocks,
+                               split_oversized_code, split_oversized_text)
 from zerocost.documents import DocumentBlock, parse_markdown
 
 
@@ -115,3 +116,54 @@ def test_heading_space_is_reserved_for_unbroken_first_body_piece():
     chunks = split_oversized_text(original, target_chars=50, max_chars=100)
     assert chunks[0].content.startswith('Başlık\n\n')
     assert all(len(chunk.content) <= 100 and not chunk.oversized for chunk in chunks)
+
+
+def test_oversized_python_is_refenced_with_language_and_content_preserved():
+    body = '\n'.join([f'def function_{index}():\n    return {index}\n' for index in range(8)])
+    block = DocumentBlock('code', f'```python\n{body}\n```', 10, 34, ('API',))
+    original = merge_semantic_blocks([
+        DocumentBlock('heading', 'API', 8, 8, ('API',)), block,
+    ], target_chars=90, max_chars=120)
+    chunks = split_oversized_code(original, target_chars=90, max_chars=120)
+    assert len(chunks) > 1
+    assert all(chunk.content.count('```python') == 1 for chunk in chunks)
+    assert all(chunk.content.rstrip().endswith('```') for chunk in chunks)
+    recovered = '\n'.join(chunk.content.split('```python\n', 1)[1].rsplit('\n```', 1)[0]
+                          for chunk in chunks)
+    assert recovered.replace('\n', '') == body.replace('\n', '')
+    assert chunks[0].content.startswith('API\n\n```python')
+    assert chunks[0].start_line == 8
+    assert all(len(chunk.content) <= 120 and not chunk.oversized for chunk in chunks)
+
+
+def test_code_split_prefers_top_level_declaration_boundary():
+    body = 'x = 1\n' * 6 + '\ndef beta():\n    return 2\n' + 'y = 3\n' * 6
+    block = DocumentBlock('code', f'~~~python\n{body}~~~', 1, 16, ('Kod',))
+    chunks = split_oversized_code(
+        merge_semantic_blocks([block], target_chars=50, max_chars=75),
+        target_chars=50, max_chars=75)
+    assert chunks[1].content.startswith('~~~python\ndef beta():')
+    assert all(chunk.content.rstrip().endswith('~~~') for chunk in chunks)
+
+
+def test_unclosed_fence_is_closed_and_long_line_falls_back_with_same_citation():
+    block = DocumentBlock('code', '```json\n' + 'x' * 180, 40, 41, ('Veri',))
+    chunks = split_oversized_code(
+        merge_semantic_blocks([block], target_chars=50, max_chars=70),
+        target_chars=50, max_chars=70)
+    assert len(chunks) > 2
+    assert all(chunk.content.startswith('```json\n') and chunk.content.endswith('\n```')
+               for chunk in chunks)
+    assert all(chunk.start_line == chunk.end_line == 41 for chunk in chunks)
+    assert all(len(chunk.content) <= 70 for chunk in chunks)
+    recovered = ''.join(chunk.content.removeprefix('```json\n').removesuffix('\n```')
+                        for chunk in chunks)
+    assert recovered == 'x' * 180
+
+
+def test_code_splitter_leaves_text_and_regular_code_unchanged():
+    text = SemanticChunk('metin', 1, 1, (), ('paragraph',), True)
+    code = merge_semantic_blocks([
+        DocumentBlock('code', '```py\nx = 1\n```', 1, 3),
+    ], target_chars=50, max_chars=100)[0]
+    assert split_oversized_code([text, code], target_chars=50, max_chars=100) == [text, code]

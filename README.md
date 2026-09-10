@@ -83,6 +83,8 @@ Semantik birleştirici varsayılan 2.400 karakter hedefi ve 3.200 karakter azami
 
 Oversized düz metin bölücüsü cümle sonlarını önceliklendirir; yaygın Türkçe/İngilizce kısaltmaları ve tek harfli isimleri yanlış sınır saymaz. Tek cümle azami boyutu aşıyorsa sırasıyla satır, noktalı virgül, iki nokta, virgül, kelime ve son çare olarak Unicode karakter sınırına iner. Başlık için ilk gövde parçasında yer ayırır, her parçanın özgün satır aralığını kaynak bloktan hesaplar ve hiçbir çıktının azami karakter sınırını aşmasına izin vermez. Code içeren oversized chunk'lar değiştirilmeden ayrı kod bölücüsüne aktarılır.
 
+Oversized code bölücüsü özgün backtick/tilde fence açılışını ve dil etiketini her parçada yeniden üretir, parçayı aynı fence ile kapatır. İlk parça frontmatter/başlık bağlamını korur. Bölme önce boş satır ve üst seviye `class`, `def`, `function`, `fn`, `struct`, `interface` gibi bildirim sınırlarını; sonra kaynak satırını tercih eder. Tek bir minified satır limite sığmıyorsa içerik kaybetmeden Unicode karakter sınırına iner ve tüm parçalar aynı kaynak satırını işaret eder. Kapanmamış kaynak fence güvenli biçimde kapatılır. Bu katman henüz overlap eklemez.
+
 Embedding API sözleşmesi: [Ollama Embeddings](https://docs.ollama.com/capabilities/embeddings) ve [Ollama `/api/embed`](https://docs.ollama.com/api/embed).
 
 ## Pydantic → TypeScript sözleşmesi
@@ -133,7 +135,7 @@ macOS uygulaması `src-tauri/target/release/bundle/macos/ZeroCost.app` altında 
 
 ## Sonraki geliştirme dilimi
 
-1. Oversized code bloklarını satır/yapı sınırında güvenli bölme ve sliding-window overlap.
+1. Metin ve code chunk'ları için kontrollü sliding-window overlap.
 2. Kaynak ekleme ve indeksleme arayüzü.
 3. Hibrit FTS/vektör sıralaması, kaynak alıntıları ve ajan `knowledge.search` aracı.
 4. Skill paket manifesti, sürümleme ve izin beyanları.
