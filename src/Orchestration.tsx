@@ -102,6 +102,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
         }
         return;
       }
+      if (payload.type === "knowledge_ingestion_progress") return;
       if (!payload.type.startsWith("orchestration_")) return;
       if (
         payload.run_id !== runId.current ||

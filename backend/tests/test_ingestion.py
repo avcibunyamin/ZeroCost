@@ -78,11 +78,16 @@ def test_embedding_misses_are_batched_at_provider_limit(tmp_path):
         collection_id = store.create_knowledge_collection(KnowledgeCollectionInput(
             name='Docs', embedding_model='embed-local'), 3)
         CountingEmbeddings.calls = []
+        progress = []
         chunks = [DocumentChunk(f'parça {index}', index + 1, index + 1) for index in range(33)]
         result = await KnowledgeIngestor(store, CountingEmbeddings).index_chunks(
-            collection_id, workspace.id, 'large.md', 'large', chunks)
+            collection_id, workspace.id, 'large.md', 'large', chunks,
+            lambda stage, completed, total: progress.append((stage, completed, total)))
         assert result.embedded_count == 33
         assert [len(batch) for batch in CountingEmbeddings.calls] == [32, 1]
+        assert progress == [('embedding', 0, 33), ('embedding', 32, 33),
+                            ('embedding', 33, 33), ('committing', 0, 1),
+                            ('committing', 1, 1)]
         store.close()
 
     asyncio.run(scenario())

@@ -425,6 +425,32 @@ class KnowledgeIngestionResult(Model):
     reused_count: int
 
 
+class KnowledgeIngestionProgress(Model):
+    protocol_version: Literal[1] = 1
+    type: Literal["knowledge_ingestion_progress"] = "knowledge_ingestion_progress"
+    request_id: Identifier
+    sequence: int = Field(ge=1)
+    collection_id: str
+    workspace_id: str
+    path: Annotated[str, StringConstraints(max_length=4096)]
+    stage: Literal["reading", "parsing", "chunking", "embedding", "committing", "completed"]
+    completed_units: int = Field(ge=0)
+    total_units: int = Field(ge=0)
+    progress_percent: int = Field(ge=0, le=100)
+    message: Annotated[str, StringConstraints(min_length=1, max_length=240)]
+    is_final: bool = False
+
+    @model_validator(mode="after")
+    def consistent_progress(self):
+        if self.completed_units > self.total_units:
+            raise ValueError("Completed units exceed total units")
+        if self.is_final != (self.stage == "completed"):
+            raise ValueError("Only the completed stage is final")
+        if self.stage == "completed" and self.progress_percent != 100:
+            raise ValueError("Completed progress must be 100")
+        return self
+
+
 class OrchestrationMessage(Model):
     sequence: int
     agent_id: str
@@ -593,4 +619,4 @@ class Contract(Model):
     event: Union[StreamEvent, OrchestrationChunk, OrchestrationMessageEnd,
                  OrchestrationEnd, OrchestrationError, OrchestrationRoute,
                  OrchestrationApprovalRequired, OrchestrationUsage,
-                 OrchestrationToolResult]
+                 OrchestrationToolResult, KnowledgeIngestionProgress]

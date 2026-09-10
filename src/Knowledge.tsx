@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { BookOpen, BrainCircuit, Check, Database, LoaderCircle, Plus, RefreshCw } from "lucide-react";
 import { desktopAvailable, rpc } from "./api";
-import type { KnowledgeSnapshot } from "./generated/contract";
+import validateEvent from "./generated/validate-event.js";
+import type { KnowledgeIngestionProgress, KnowledgeSnapshot } from "./generated/contract";
 
 const emptySnapshot: KnowledgeSnapshot = {
   collections: [],
@@ -16,6 +18,7 @@ export function Knowledge() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [progress, setProgress] = useState<KnowledgeIngestionProgress | null>(null);
 
   const refresh = useCallback(async () => {
     if (!desktopAvailable) return;
@@ -35,6 +38,33 @@ export function Knowledge() {
   }, []);
 
   useEffect(() => void refresh(), [refresh]);
+  useEffect(() => {
+    if (!desktopAvailable) return;
+    let disposed = false;
+    let unlisten: undefined | (() => void);
+    listen<unknown>("chat_stream", ({ payload }) => {
+      if (disposed) return;
+      if (!validateEvent(payload)) {
+        setError("İndeksleme olayı beklenen şemaya uymuyor.");
+        return;
+      }
+      if (payload.type !== "knowledge_ingestion_progress") return;
+      setProgress((current) =>
+        current && current.request_id === payload.request_id && current.sequence >= payload.sequence
+          ? current
+          : payload,
+      );
+    })
+      .then((stop) => {
+        if (disposed) stop();
+        else unlisten = stop;
+      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   async function createCollection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -78,6 +108,24 @@ export function Knowledge() {
           <span>{snapshot.embedding_error} Ollama'yı başlatıp bir embedding modeli yükleyin.</span>
         </div>
       )}
+
+      <section className="knowledge-progress" aria-live="polite">
+        <div className="knowledge-progress-copy">
+          <span className={`small-icon ${progress?.is_final ? "ready" : ""}`}>
+            {progress && !progress.is_final
+              ? <LoaderCircle className="spin" size={18} />
+              : <Check size={18} />}
+          </span>
+          <div>
+            <strong>{progress?.message ?? "İndeksleme kuyruğu hazır."}</strong>
+            <span>{progress
+              ? `${progress.path} · %${progress.progress_percent}`
+              : "Bir kaynak eklendiğinde aşamalar burada gösterilecek."}</span>
+          </div>
+        </div>
+        <progress max="100" value={progress?.progress_percent ?? 0}
+          aria-label="Belge indeksleme ilerlemesi" />
+      </section>
 
       <div className="knowledge-grid">
         <section className="panel knowledge-create">

@@ -337,7 +337,8 @@ export type Event =
   | OrchestrationRoute
   | OrchestrationApprovalRequired
   | OrchestrationUsage
-  | OrchestrationToolResult;
+  | OrchestrationToolResult
+  | KnowledgeIngestionProgress;
 export type ProtocolVersion23 = 1;
 export type Type = "stream_chunk";
 export type RunId7 = string;
@@ -431,6 +432,19 @@ export type Tool2 = "workspace.write" | "terminal.execute";
 export type Status7 = "completed" | "failed";
 export type Result2 = string;
 export type IsFinal10 = false;
+export type ProtocolVersion35 = 1;
+export type Type12 = "knowledge_ingestion_progress";
+export type RequestId22 = string;
+export type Sequence12 = number;
+export type CollectionId2 = string;
+export type WorkspaceId8 = string;
+export type Path10 = string;
+export type Stage = "reading" | "parsing" | "chunking" | "embedding" | "committing" | "completed";
+export type CompletedUnits = number;
+export type TotalUnits = number;
+export type ProgressPercent = number;
+export type Message5 = string;
+export type IsFinal11 = boolean;
 
 export interface Contract {
   request: Request;
@@ -1183,4 +1197,23 @@ export interface OrchestrationToolResult {
   status: Status7;
   result: Result2;
   is_final: IsFinal10;
+}
+/**
+ * This interface was referenced by `Contract`'s JSON-Schema
+ * via the `definition` "KnowledgeIngestionProgress".
+ */
+export interface KnowledgeIngestionProgress {
+  protocol_version: ProtocolVersion35;
+  type: Type12;
+  request_id: RequestId22;
+  sequence: Sequence12;
+  collection_id: CollectionId2;
+  workspace_id: WorkspaceId8;
+  path: Path10;
+  stage: Stage;
+  completed_units: CompletedUnits;
+  total_units: TotalUnits;
+  progress_percent: ProgressPercent;
+  message: Message5;
+  is_final: IsFinal11;
 }

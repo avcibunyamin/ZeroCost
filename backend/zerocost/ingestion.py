@@ -2,6 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
+from typing import Callable
 
 from .embeddings import MAX_EMBED_INPUTS
 from .documents import DocumentBlock
@@ -46,7 +47,9 @@ class KnowledgeIngestor:
 
     async def index_chunks(self, collection_id: str, workspace_id: str, path: str,
                            content: str,
-                           chunks: list[DocumentChunk | DocumentBlock | SemanticChunk]) -> IndexResult:
+                           chunks: list[DocumentChunk | DocumentBlock | SemanticChunk],
+                           on_progress: Callable[[str, int, int], None] | None = None
+                           ) -> IndexResult:
         collection = self.store.knowledge_collection(collection_id)
         if collection is None or self.store.workspace(workspace_id) is None:
             raise ValueError('Bilgi koleksiyonu veya çalışma alanı bulunamadı.')
@@ -69,12 +72,18 @@ class KnowledgeIngestor:
                 seen.add(item_hash)
 
         provider = self.embedding_factory(collection['embedding_model'])
+        if on_progress:
+            on_progress('embedding', 0, len(missing))
+        embedded = 0
         for offset in range(0, len(missing), MAX_EMBED_INPUTS):
             batch = missing[offset:offset + MAX_EMBED_INPUTS]
             vectors = await provider.embed([item[1] for item in batch])
             if len(vectors) != len(batch):
                 raise ValueError('Embedding yanıt sayısı chunk sayısıyla uyuşmuyor.')
             cached.update({item[0]: vector for item, vector in zip(batch, vectors)})
+            embedded += len(batch)
+            if on_progress:
+                on_progress('embedding', embedded, len(missing))
 
         prepared = [{
             'start_line': item.start_line,
@@ -83,6 +92,10 @@ class KnowledgeIngestor:
             'content_hash': item_hash,
             'embedding': cached[item_hash],
         } for item, item_hash in zip(chunks, hashes)]
+        if on_progress:
+            on_progress('committing', 0, 1)
         self.store.replace_knowledge_source(
             collection_id, workspace_id, path, digest, prepared, INDEX_VERSION)
+        if on_progress:
+            on_progress('committing', 1, 1)
         return IndexResult('indexed', len(chunks), len(missing), len(chunks) - len(missing))

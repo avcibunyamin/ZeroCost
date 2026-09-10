@@ -179,3 +179,12 @@ Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırıl
 - Sonuçta indeks durumu ile toplam, yeni ve yeniden kullanılan chunk sayaçları
 - Rust köprüsünde indekslemeye özel 305 saniyelik sınırlı bekleme
 - 88 Python, 10 JavaScript sözleşme ve 2 etkin Rust testi geçti
+
+## Faz 3 · Canlı ingestion ilerleme akışı
+
+- Okuma, parsing, chunking, embedding partileri, transaction ve tamamlanma aşamaları
+- İstek kimliği ve monoton sıra numarasıyla eşzamanlı/eskimiş olay izolasyonu
+- Embedding aşamasında gerçek tamamlanan/toplam yeni chunk iş birimleri
+- 0–100 sınırını zorlayan kapalı Pydantic/TypeScript çalışma zamanı sözleşmesi
+- Rust event allowlist ve React'ta erişilebilir, aşama metinli progress bar
+- 89 Python, 11 JavaScript sözleşme ve 2 etkin Rust testi geçti

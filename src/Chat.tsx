@@ -126,6 +126,7 @@ export function Chat({
         setStopping(false);
         return;
       }
+      if (payload.type === "knowledge_ingestion_progress") return;
       if (
         payload.run_id !== run.current ||
         payload.sequence <= sequence.current

@@ -23,7 +23,7 @@ from .chunking import build_semantic_chunks
 from .documents import parse_document
 from .ingestion import KnowledgeIngestor
 from .knowledge_files import read_knowledge_source
-from .models import KnowledgeIngestionResult
+from .models import KnowledgeIngestionProgress, KnowledgeIngestionResult
 
 MAX_FRAME_BYTES = 64 * 1024
 request_adapter = TypeAdapter(Request)
@@ -171,16 +171,55 @@ class ChatService:
                 self.store.create_knowledge_collection(request.params, len(vectors[0]))
                 result = self.store.knowledge_snapshot(models)
             elif request.method == 'knowledge.source.ingest':
+                sequence = 0
+                event_path = request.params.path
+
+                def progress(stage, completed, total, percent, message, final=False):
+                    nonlocal sequence
+                    sequence += 1
+                    self.output(KnowledgeIngestionProgress(
+                        request_id=request.request_id, sequence=sequence,
+                        collection_id=request.params.collection_id,
+                        workspace_id=request.params.workspace_id,
+                        path=event_path, stage=stage,
+                        completed_units=completed, total_units=total,
+                        progress_percent=percent, message=message, is_final=final))
+
+                progress('reading', 0, 1, 2, 'Belge güvenli çalışma alanından okunuyor.')
                 path, content = read_knowledge_source(
                     self.store, request.params.workspace_id, request.params.path)
-                chunks = build_semantic_chunks(parse_document(content, path))
+                event_path = path
+                progress('reading', 1, 1, 10, 'Belge güvenle okundu.')
+                progress('parsing', 0, 1, 14, 'Belge yapısı ayrıştırılıyor.')
+                blocks = parse_document(content, path)
+                progress('parsing', 1, 1, 25, f'{len(blocks)} semantik blok ayrıştırıldı.')
+                progress('chunking', 0, 1, 30, 'Bağlam duyarlı parçalar hazırlanıyor.')
+                chunks = build_semantic_chunks(blocks)
+                progress('chunking', 1, 1, 38, f'{len(chunks)} parça hazırlandı.')
+
+                def ingestion_progress(stage, completed, total):
+                    if stage == 'embedding':
+                        ratio = completed / total if total else 1
+                        percent = 40 + round(50 * ratio)
+                        message = (f'{completed}/{total} yeni parça embed edildi.' if total
+                                   else 'Tüm embeddingler önbellekten yeniden kullanıldı.')
+                    else:
+                        percent = 94 if completed == 0 else 98
+                        message = ('SQLite transaction hazırlanıyor.' if completed == 0
+                                   else 'SQLite ve FTS indeksi güncellendi.')
+                    progress(stage, completed, total, percent, message)
+
                 try:
                     indexed = await asyncio.wait_for(KnowledgeIngestor(
                         self.store, self.embedding_factory).index_chunks(
                             request.params.collection_id, request.params.workspace_id,
-                            path, content, chunks), timeout=300)
+                            path, content, chunks, ingestion_progress), timeout=300)
                 except asyncio.TimeoutError:
                     raise ValueError('Belge indeksleme zaman aşımına uğradı.') from None
+                progress('completed', 1, 1, 100,
+                         ('Belge zaten güncel; yeni embedding gerekmedi.'
+                          if indexed.status == 'unchanged'
+                          else 'Belge indeksi kullanıma hazır.'), True)
                 result = KnowledgeIngestionResult(
                     collection_id=request.params.collection_id,
                     workspace_id=request.params.workspace_id,

@@ -7,7 +7,7 @@ import sys
 import pytest
 import asyncio
 from zerocost.models import (AgentInput, ConnectionInput, WorkspaceInput,
-                             KnowledgeCollectionInput)
+                             KnowledgeCollectionInput, KnowledgeIngestionProgress)
 from zerocost.sidecar import ChatService, dispatch
 from zerocost.storage import Store
 from zerocost.providers.base import Message, ProviderError
@@ -267,7 +267,8 @@ def test_knowledge_source_ipc_reads_chunks_and_indexes_idempotently(tmp_path):
         collection_id = store.create_knowledge_collection(KnowledgeCollectionInput(
             name='Docs', embedding_model='embed-local'), 3)
         FakeEmbeddings.calls = []
-        service = ChatService(store, embedding_factory=FakeEmbeddings)
+        events = []
+        service = ChatService(store, events.append, embedding_factory=FakeEmbeddings)
         raw = request('knowledge.source.ingest', collection_id=collection_id,
                       workspace_id=workspace.id, path='docs/guide.md')
         response = await service.handle(raw)
@@ -277,15 +278,32 @@ def test_knowledge_source_ipc_reads_chunks_and_indexes_idempotently(tmp_path):
         assert response.result.embedded_count == response.result.chunk_count
         assert any('Önceki metin bağlamı' in text
                    for batch in FakeEmbeddings.calls for text in batch)
+        progress = [event for event in events
+                    if event.type == 'knowledge_ingestion_progress']
+        assert [event.sequence for event in progress] == list(range(1, len(progress) + 1))
+        assert {event.stage for event in progress} >= {
+            'reading', 'parsing', 'chunking', 'embedding', 'committing', 'completed'}
+        assert progress[-1].is_final and progress[-1].progress_percent == 100
+        assert progress[-1].request_id == 'test-1'
 
+        events.clear()
         unchanged = await service.handle(raw)
         assert unchanged.ok and unchanged.result.status == 'unchanged'
         assert unchanged.result.embedded_count == 0
+        assert events[-1].stage == 'completed' and events[-1].progress_percent == 100
         assert store.knowledge_snapshot().collections[0].source_count == 1
         await service.close()
         store.close()
 
     asyncio.run(scenario())
+
+
+def test_knowledge_progress_rejects_inconsistent_terminal_state():
+    with pytest.raises(ValueError, match='completed stage'):
+        KnowledgeIngestionProgress(
+            request_id='ingest', sequence=1, collection_id='c', workspace_id='w',
+            path='guide.md', stage='embedding', completed_units=1, total_units=1,
+            progress_percent=100, message='Bitti.', is_final=True)
 
 
 def test_v8_knowledge_data_migrates_to_versioned_hash_cache(tmp_path):

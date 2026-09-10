@@ -89,6 +89,8 @@ Birleşik chunk hattı semantik paketleme, oversized düz metin bölme, fenced-c
 
 `knowledge.source.ingest` IPC komutu, kayıtlı bir çalışma alanı ve koleksiyon kimliğiyle göreli `.txt`/Markdown yolunu indeksleme hattına bağlar. Backend yolu yeniden doğrular; mutlak, gizli, dışlanan, çalışma alanından kaçan, symlink, ikili, boş, UTF-8 olmayan ve 1 MiB üzerindeki dosyaları Ollama çağrısından önce reddeder. Başarılı yanıt kanonik göreli yolu, durum ile toplam/yeni/yeniden kullanılan chunk sayılarını döndürür. Rust köprüsü uzun yerel embedding işlemleri için 305 saniyelik sınırlı yanıt süresi uygular; renderer dosya içeriğini IPC zarfına taşımaz.
 
+İndeksleme sürerken `knowledge_ingestion_progress` olayları okuma, ayrıştırma, chunking, embedding partileri, SQLite transaction ve tamamlanma aşamalarını bildirir. Her olay istek kimliği, monoton sıra numarası, ölçülen tamamlanan/toplam iş birimi ve 0–100 ilerleme değeri taşır. Rust yalnız izin verilen olay türlerini renderer'a geçirir; React çalışma zamanı şemasını doğrular, eski sıra numaralarını yok sayar ve erişilebilir progress bar'ı günceller.
+
 Embedding API sözleşmesi: [Ollama Embeddings](https://docs.ollama.com/capabilities/embeddings) ve [Ollama `/api/embed`](https://docs.ollama.com/api/embed).
 
 ## Pydantic → TypeScript sözleşmesi
@@ -142,5 +144,5 @@ macOS uygulaması `src-tauri/target/release/bundle/macos/ZeroCost.app` altında 
 1. Güvenli dosya seçiciyle `.txt`/Markdown kaynak ekleme arayüzü ve birleşik ingestion bağlantısı.
 2. Koleksiyonlarda hibrit FTS + cosine arama ve kaynak referanslı `knowledge.search` ajan aracı.
 3. Skill paket manifesti, sürümleme ve izin beyanları.
-5. Kesilmiş üretim düğümünü kontrollü yeniden deneme ve kısmi görev devamı.
-6. Sağlayıcı cache/batch tarifeleri ve kullanıcıya özel fiyat profilleri.
+4. Kesilmiş üretim düğümünü kontrollü yeniden deneme ve kısmi görev devamı.
+5. Sağlayıcı cache/batch tarifeleri ve kullanıcıya özel fiyat profilleri.

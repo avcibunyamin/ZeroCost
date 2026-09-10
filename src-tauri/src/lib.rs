@@ -25,6 +25,24 @@ fn response_timeout_seconds(request: &Value, ready: bool) -> u64 {
     }
 }
 
+fn allowed_event_type(kind: &str) -> bool {
+    matches!(
+        kind,
+        "stream_chunk"
+            | "stream_end"
+            | "stream_error"
+            | "orchestration_chunk"
+            | "orchestration_message_end"
+            | "orchestration_end"
+            | "orchestration_error"
+            | "orchestration_route"
+            | "orchestration_approval_required"
+            | "orchestration_usage"
+            | "orchestration_tool_result"
+            | "knowledge_ingestion_progress"
+    )
+}
+
 struct Sidecar {
     child: Mutex<Child>,
     stdin: Mutex<ChildStdin>,
@@ -113,20 +131,7 @@ impl Sidecar {
                     break;
                 }
                 if let Some(kind) = frame["type"].as_str() {
-                    if !matches!(
-                        kind,
-                        "stream_chunk"
-                            | "stream_end"
-                            | "stream_error"
-                            | "orchestration_chunk"
-                            | "orchestration_message_end"
-                            | "orchestration_end"
-                            | "orchestration_error"
-                            | "orchestration_route"
-                            | "orchestration_approval_required"
-                            | "orchestration_usage"
-                            | "orchestration_tool_result"
-                    ) {
+                    if !allowed_event_type(kind) {
                         break;
                     }
                     events(frame);
@@ -446,6 +451,8 @@ mod tests {
 
     #[test]
     fn ingestion_bridge_allows_bounded_long_running_embedding() {
+        assert!(allowed_event_type("knowledge_ingestion_progress"));
+        assert!(!allowed_event_type("unknown_progress"));
         assert_eq!(
             response_timeout_seconds(&json!({"method":"knowledge.source.ingest"}), true),
             305

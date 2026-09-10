@@ -106,6 +106,20 @@ test("orchestration stream attributes every chunk", () => {
     run_id: "run", sequence: 3, tool: "workspace.write", status: "completed",
     result: "written", is_final: false }), true);
 });
+
+test("knowledge progress is correlated, bounded and closed", () => {
+  const progress = {
+    protocol_version: 1, type: "knowledge_ingestion_progress",
+    request_id: "ingest", sequence: 4, collection_id: "c", workspace_id: "w",
+    path: "docs/guide.md", stage: "embedding", completed_units: 12,
+    total_units: 20, progress_percent: 70, message: "12/20 yeni parça embed edildi.",
+    is_final: false,
+  };
+  assert.equal(validateEvent(progress), true);
+  assert.equal(validateEvent({ ...progress, progress_percent: 101 }), false);
+  assert.equal(validateEvent({ ...progress, completed_units: -1 }), false);
+  assert.equal(validateEvent({ ...progress, secret: "forbidden" }), false);
+});
 const valid = {
   protocol_version: 1,
   request_id: "test",

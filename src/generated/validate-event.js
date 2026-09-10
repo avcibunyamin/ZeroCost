@@ -1,3 +1,38 @@
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __commonJS = (cb, mod) => function __require() {
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
+};
+
+// node_modules/ajv/dist/runtime/ucs2length.js
+var require_ucs2length = __commonJS({
+  "node_modules/ajv/dist/runtime/ucs2length.js"(exports) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    function ucs2length(str) {
+      const len = str.length;
+      let length = 0;
+      let pos = 0;
+      let value;
+      while (pos < len) {
+        length++;
+        value = str.charCodeAt(pos++);
+        if (value >= 55296 && value <= 56319 && pos < len) {
+          value = str.charCodeAt(pos);
+          if ((value & 64512) === 56320)
+            pos++;
+        }
+      }
+      return length;
+    }
+    exports.default = ucs2length;
+    ucs2length.code = 'require("ajv/dist/runtime/ucs2length").default';
+  }
+});
+
 // validate-event.js
 var validate = validate10;
 var validate_event_default = validate10;
@@ -8,7 +43,9 @@ var schema18 = { "additionalProperties": false, "properties": { "protocol_versio
 var schema20 = { "additionalProperties": false, "properties": { "protocol_version": { "const": 1, "default": 1, "title": "Protocol Version", "type": "integer" }, "type": { "const": "orchestration_route", "default": "orchestration_route", "title": "Type", "type": "string" }, "run_id": { "title": "Run Id", "type": "string" }, "sequence": { "title": "Sequence", "type": "integer" }, "agent_ids": { "items": { "type": "string" }, "title": "Agent Ids", "type": "array" }, "reason": { "title": "Reason", "type": "string" }, "planned_model_calls": { "title": "Planned Model Calls", "type": "integer" }, "max_model_calls": { "title": "Max Model Calls", "type": "integer" }, "max_output_tokens": { "title": "Max Output Tokens", "type": "integer" }, "estimated_max_cost_microusd": { "title": "Estimated Max Cost Microusd", "type": "integer" }, "max_cost_microusd": { "title": "Max Cost Microusd", "type": "integer" }, "price_catalog_version": { "title": "Price Catalog Version", "type": "string" }, "is_final": { "const": false, "default": false, "title": "Is Final", "type": "boolean" } }, "required": ["protocol_version", "type", "run_id", "sequence", "agent_ids", "reason", "planned_model_calls", "max_model_calls", "max_output_tokens", "estimated_max_cost_microusd", "max_cost_microusd", "price_catalog_version", "is_final"], "title": "OrchestrationRoute", "type": "object" };
 var schema21 = { "additionalProperties": false, "properties": { "protocol_version": { "const": 1, "default": 1, "title": "Protocol Version", "type": "integer" }, "type": { "const": "orchestration_approval_required", "default": "orchestration_approval_required", "title": "Type", "type": "string" }, "run_id": { "title": "Run Id", "type": "string" }, "sequence": { "title": "Sequence", "type": "integer" }, "permission": { "enum": ["workspace.read", "workspace.write", "terminal.execute"], "title": "Permission", "type": "string" }, "workspace_id": { "title": "Workspace Id", "type": "string" }, "paths": { "items": { "type": "string" }, "title": "Paths", "type": "array" }, "tool": { "anyOf": [{ "enum": ["workspace.write", "terminal.execute"], "type": "string" }, { "type": "null" }], "default": null, "title": "Tool" }, "path": { "default": "", "title": "Path", "type": "string" }, "command": { "items": { "type": "string" }, "title": "Command", "type": "array" }, "preview": { "default": "", "title": "Preview", "type": "string" }, "risk": { "anyOf": [{ "enum": ["medium", "high"], "type": "string" }, { "type": "null" }], "default": null, "title": "Risk" }, "is_final": { "const": false, "default": false, "title": "Is Final", "type": "boolean" } }, "required": ["protocol_version", "type", "run_id", "sequence", "permission", "workspace_id", "paths", "tool", "path", "command", "preview", "risk", "is_final"], "title": "OrchestrationApprovalRequired", "type": "object" };
 var schema23 = { "additionalProperties": false, "properties": { "protocol_version": { "const": 1, "default": 1, "title": "Protocol Version", "type": "integer" }, "type": { "const": "orchestration_tool_result", "default": "orchestration_tool_result", "title": "Type", "type": "string" }, "run_id": { "title": "Run Id", "type": "string" }, "sequence": { "title": "Sequence", "type": "integer" }, "tool": { "enum": ["workspace.write", "terminal.execute"], "title": "Tool", "type": "string" }, "status": { "enum": ["completed", "failed"], "title": "Status", "type": "string" }, "result": { "title": "Result", "type": "string" }, "is_final": { "const": false, "default": false, "title": "Is Final", "type": "boolean" } }, "required": ["protocol_version", "type", "run_id", "sequence", "tool", "status", "result", "is_final"], "title": "OrchestrationToolResult", "type": "object" };
+var schema24 = { "additionalProperties": false, "properties": { "protocol_version": { "const": 1, "default": 1, "title": "Protocol Version", "type": "integer" }, "type": { "const": "knowledge_ingestion_progress", "default": "knowledge_ingestion_progress", "title": "Type", "type": "string" }, "request_id": { "maxLength": 128, "minLength": 1, "title": "Request Id", "type": "string" }, "sequence": { "minimum": 1, "title": "Sequence", "type": "integer" }, "collection_id": { "title": "Collection Id", "type": "string" }, "workspace_id": { "title": "Workspace Id", "type": "string" }, "path": { "maxLength": 4096, "title": "Path", "type": "string" }, "stage": { "enum": ["reading", "parsing", "chunking", "embedding", "committing", "completed"], "title": "Stage", "type": "string" }, "completed_units": { "minimum": 0, "title": "Completed Units", "type": "integer" }, "total_units": { "minimum": 0, "title": "Total Units", "type": "integer" }, "progress_percent": { "maximum": 100, "minimum": 0, "title": "Progress Percent", "type": "integer" }, "message": { "maxLength": 240, "minLength": 1, "title": "Message", "type": "string" }, "is_final": { "default": false, "title": "Is Final", "type": "boolean" } }, "required": ["protocol_version", "type", "request_id", "sequence", "collection_id", "workspace_id", "path", "stage", "completed_units", "total_units", "progress_percent", "message", "is_final"], "title": "KnowledgeIngestionProgress", "type": "object" };
 var func2 = Object.prototype.hasOwnProperty;
+var func5 = require_ucs2length().default;
 function validate10(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -2685,6 +2722,424 @@ function validate10(data, { instancePath = "", parentData, parentDataProperty, r
                         }
                         var _valid0 = _errs229 === errors;
                         valid0 = valid0 || _valid0;
+                        if (!valid0) {
+                          const _errs249 = errors;
+                          const _errs250 = errors;
+                          if (errors === _errs250) {
+                            if (data && typeof data == "object" && !Array.isArray(data)) {
+                              let missing12;
+                              if (data.protocol_version === void 0 && (missing12 = "protocol_version") || data.type === void 0 && (missing12 = "type") || data.request_id === void 0 && (missing12 = "request_id") || data.sequence === void 0 && (missing12 = "sequence") || data.collection_id === void 0 && (missing12 = "collection_id") || data.workspace_id === void 0 && (missing12 = "workspace_id") || data.path === void 0 && (missing12 = "path") || data.stage === void 0 && (missing12 = "stage") || data.completed_units === void 0 && (missing12 = "completed_units") || data.total_units === void 0 && (missing12 = "total_units") || data.progress_percent === void 0 && (missing12 = "progress_percent") || data.message === void 0 && (missing12 = "message") || data.is_final === void 0 && (missing12 = "is_final")) {
+                                const err180 = { instancePath, schemaPath: "#/$defs/KnowledgeIngestionProgress/required", keyword: "required", params: { missingProperty: missing12 }, message: "must have required property '" + missing12 + "'" };
+                                if (vErrors === null) {
+                                  vErrors = [err180];
+                                } else {
+                                  vErrors.push(err180);
+                                }
+                                errors++;
+                              } else {
+                                const _errs252 = errors;
+                                for (const key12 in data) {
+                                  if (!func2.call(schema24.properties, key12)) {
+                                    const err181 = { instancePath, schemaPath: "#/$defs/KnowledgeIngestionProgress/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key12 }, message: "must NOT have additional properties" };
+                                    if (vErrors === null) {
+                                      vErrors = [err181];
+                                    } else {
+                                      vErrors.push(err181);
+                                    }
+                                    errors++;
+                                    break;
+                                  }
+                                }
+                                if (_errs252 === errors) {
+                                  if (data.protocol_version !== void 0) {
+                                    let data96 = data.protocol_version;
+                                    const _errs253 = errors;
+                                    if (!(typeof data96 == "number" && (!(data96 % 1) && !isNaN(data96)))) {
+                                      const err182 = { instancePath: instancePath + "/protocol_version", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/protocol_version/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
+                                      if (vErrors === null) {
+                                        vErrors = [err182];
+                                      } else {
+                                        vErrors.push(err182);
+                                      }
+                                      errors++;
+                                    }
+                                    if (1 !== data96) {
+                                      const err183 = { instancePath: instancePath + "/protocol_version", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/protocol_version/const", keyword: "const", params: { allowedValue: 1 }, message: "must be equal to constant" };
+                                      if (vErrors === null) {
+                                        vErrors = [err183];
+                                      } else {
+                                        vErrors.push(err183);
+                                      }
+                                      errors++;
+                                    }
+                                    var valid31 = _errs253 === errors;
+                                  } else {
+                                    var valid31 = true;
+                                  }
+                                  if (valid31) {
+                                    if (data.type !== void 0) {
+                                      let data97 = data.type;
+                                      const _errs255 = errors;
+                                      if (typeof data97 !== "string") {
+                                        const err184 = { instancePath: instancePath + "/type", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/type/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                        if (vErrors === null) {
+                                          vErrors = [err184];
+                                        } else {
+                                          vErrors.push(err184);
+                                        }
+                                        errors++;
+                                      }
+                                      if ("knowledge_ingestion_progress" !== data97) {
+                                        const err185 = { instancePath: instancePath + "/type", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/type/const", keyword: "const", params: { allowedValue: "knowledge_ingestion_progress" }, message: "must be equal to constant" };
+                                        if (vErrors === null) {
+                                          vErrors = [err185];
+                                        } else {
+                                          vErrors.push(err185);
+                                        }
+                                        errors++;
+                                      }
+                                      var valid31 = _errs255 === errors;
+                                    } else {
+                                      var valid31 = true;
+                                    }
+                                    if (valid31) {
+                                      if (data.request_id !== void 0) {
+                                        let data98 = data.request_id;
+                                        const _errs257 = errors;
+                                        if (errors === _errs257) {
+                                          if (typeof data98 === "string") {
+                                            if (func5(data98) > 128) {
+                                              const err186 = { instancePath: instancePath + "/request_id", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/request_id/maxLength", keyword: "maxLength", params: { limit: 128 }, message: "must NOT have more than 128 characters" };
+                                              if (vErrors === null) {
+                                                vErrors = [err186];
+                                              } else {
+                                                vErrors.push(err186);
+                                              }
+                                              errors++;
+                                            } else {
+                                              if (func5(data98) < 1) {
+                                                const err187 = { instancePath: instancePath + "/request_id", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/request_id/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
+                                                if (vErrors === null) {
+                                                  vErrors = [err187];
+                                                } else {
+                                                  vErrors.push(err187);
+                                                }
+                                                errors++;
+                                              }
+                                            }
+                                          } else {
+                                            const err188 = { instancePath: instancePath + "/request_id", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/request_id/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                            if (vErrors === null) {
+                                              vErrors = [err188];
+                                            } else {
+                                              vErrors.push(err188);
+                                            }
+                                            errors++;
+                                          }
+                                        }
+                                        var valid31 = _errs257 === errors;
+                                      } else {
+                                        var valid31 = true;
+                                      }
+                                      if (valid31) {
+                                        if (data.sequence !== void 0) {
+                                          let data99 = data.sequence;
+                                          const _errs259 = errors;
+                                          if (!(typeof data99 == "number" && (!(data99 % 1) && !isNaN(data99)))) {
+                                            const err189 = { instancePath: instancePath + "/sequence", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/sequence/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
+                                            if (vErrors === null) {
+                                              vErrors = [err189];
+                                            } else {
+                                              vErrors.push(err189);
+                                            }
+                                            errors++;
+                                          }
+                                          if (errors === _errs259) {
+                                            if (typeof data99 == "number") {
+                                              if (data99 < 1 || isNaN(data99)) {
+                                                const err190 = { instancePath: instancePath + "/sequence", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/sequence/minimum", keyword: "minimum", params: { comparison: ">=", limit: 1 }, message: "must be >= 1" };
+                                                if (vErrors === null) {
+                                                  vErrors = [err190];
+                                                } else {
+                                                  vErrors.push(err190);
+                                                }
+                                                errors++;
+                                              }
+                                            }
+                                          }
+                                          var valid31 = _errs259 === errors;
+                                        } else {
+                                          var valid31 = true;
+                                        }
+                                        if (valid31) {
+                                          if (data.collection_id !== void 0) {
+                                            const _errs261 = errors;
+                                            if (typeof data.collection_id !== "string") {
+                                              const err191 = { instancePath: instancePath + "/collection_id", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/collection_id/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                              if (vErrors === null) {
+                                                vErrors = [err191];
+                                              } else {
+                                                vErrors.push(err191);
+                                              }
+                                              errors++;
+                                            }
+                                            var valid31 = _errs261 === errors;
+                                          } else {
+                                            var valid31 = true;
+                                          }
+                                          if (valid31) {
+                                            if (data.workspace_id !== void 0) {
+                                              const _errs263 = errors;
+                                              if (typeof data.workspace_id !== "string") {
+                                                const err192 = { instancePath: instancePath + "/workspace_id", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/workspace_id/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                if (vErrors === null) {
+                                                  vErrors = [err192];
+                                                } else {
+                                                  vErrors.push(err192);
+                                                }
+                                                errors++;
+                                              }
+                                              var valid31 = _errs263 === errors;
+                                            } else {
+                                              var valid31 = true;
+                                            }
+                                            if (valid31) {
+                                              if (data.path !== void 0) {
+                                                let data102 = data.path;
+                                                const _errs265 = errors;
+                                                if (errors === _errs265) {
+                                                  if (typeof data102 === "string") {
+                                                    if (func5(data102) > 4096) {
+                                                      const err193 = { instancePath: instancePath + "/path", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/path/maxLength", keyword: "maxLength", params: { limit: 4096 }, message: "must NOT have more than 4096 characters" };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err193];
+                                                      } else {
+                                                        vErrors.push(err193);
+                                                      }
+                                                      errors++;
+                                                    }
+                                                  } else {
+                                                    const err194 = { instancePath: instancePath + "/path", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/path/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err194];
+                                                    } else {
+                                                      vErrors.push(err194);
+                                                    }
+                                                    errors++;
+                                                  }
+                                                }
+                                                var valid31 = _errs265 === errors;
+                                              } else {
+                                                var valid31 = true;
+                                              }
+                                              if (valid31) {
+                                                if (data.stage !== void 0) {
+                                                  let data103 = data.stage;
+                                                  const _errs267 = errors;
+                                                  if (typeof data103 !== "string") {
+                                                    const err195 = { instancePath: instancePath + "/stage", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/stage/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err195];
+                                                    } else {
+                                                      vErrors.push(err195);
+                                                    }
+                                                    errors++;
+                                                  }
+                                                  if (!(data103 === "reading" || data103 === "parsing" || data103 === "chunking" || data103 === "embedding" || data103 === "committing" || data103 === "completed")) {
+                                                    const err196 = { instancePath: instancePath + "/stage", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/stage/enum", keyword: "enum", params: { allowedValues: schema24.properties.stage.enum }, message: "must be equal to one of the allowed values" };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err196];
+                                                    } else {
+                                                      vErrors.push(err196);
+                                                    }
+                                                    errors++;
+                                                  }
+                                                  var valid31 = _errs267 === errors;
+                                                } else {
+                                                  var valid31 = true;
+                                                }
+                                                if (valid31) {
+                                                  if (data.completed_units !== void 0) {
+                                                    let data104 = data.completed_units;
+                                                    const _errs269 = errors;
+                                                    if (!(typeof data104 == "number" && (!(data104 % 1) && !isNaN(data104)))) {
+                                                      const err197 = { instancePath: instancePath + "/completed_units", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/completed_units/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err197];
+                                                      } else {
+                                                        vErrors.push(err197);
+                                                      }
+                                                      errors++;
+                                                    }
+                                                    if (errors === _errs269) {
+                                                      if (typeof data104 == "number") {
+                                                        if (data104 < 0 || isNaN(data104)) {
+                                                          const err198 = { instancePath: instancePath + "/completed_units", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/completed_units/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" };
+                                                          if (vErrors === null) {
+                                                            vErrors = [err198];
+                                                          } else {
+                                                            vErrors.push(err198);
+                                                          }
+                                                          errors++;
+                                                        }
+                                                      }
+                                                    }
+                                                    var valid31 = _errs269 === errors;
+                                                  } else {
+                                                    var valid31 = true;
+                                                  }
+                                                  if (valid31) {
+                                                    if (data.total_units !== void 0) {
+                                                      let data105 = data.total_units;
+                                                      const _errs271 = errors;
+                                                      if (!(typeof data105 == "number" && (!(data105 % 1) && !isNaN(data105)))) {
+                                                        const err199 = { instancePath: instancePath + "/total_units", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/total_units/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err199];
+                                                        } else {
+                                                          vErrors.push(err199);
+                                                        }
+                                                        errors++;
+                                                      }
+                                                      if (errors === _errs271) {
+                                                        if (typeof data105 == "number") {
+                                                          if (data105 < 0 || isNaN(data105)) {
+                                                            const err200 = { instancePath: instancePath + "/total_units", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/total_units/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" };
+                                                            if (vErrors === null) {
+                                                              vErrors = [err200];
+                                                            } else {
+                                                              vErrors.push(err200);
+                                                            }
+                                                            errors++;
+                                                          }
+                                                        }
+                                                      }
+                                                      var valid31 = _errs271 === errors;
+                                                    } else {
+                                                      var valid31 = true;
+                                                    }
+                                                    if (valid31) {
+                                                      if (data.progress_percent !== void 0) {
+                                                        let data106 = data.progress_percent;
+                                                        const _errs273 = errors;
+                                                        if (!(typeof data106 == "number" && (!(data106 % 1) && !isNaN(data106)))) {
+                                                          const err201 = { instancePath: instancePath + "/progress_percent", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/progress_percent/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
+                                                          if (vErrors === null) {
+                                                            vErrors = [err201];
+                                                          } else {
+                                                            vErrors.push(err201);
+                                                          }
+                                                          errors++;
+                                                        }
+                                                        if (errors === _errs273) {
+                                                          if (typeof data106 == "number") {
+                                                            if (data106 > 100 || isNaN(data106)) {
+                                                              const err202 = { instancePath: instancePath + "/progress_percent", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/progress_percent/maximum", keyword: "maximum", params: { comparison: "<=", limit: 100 }, message: "must be <= 100" };
+                                                              if (vErrors === null) {
+                                                                vErrors = [err202];
+                                                              } else {
+                                                                vErrors.push(err202);
+                                                              }
+                                                              errors++;
+                                                            } else {
+                                                              if (data106 < 0 || isNaN(data106)) {
+                                                                const err203 = { instancePath: instancePath + "/progress_percent", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/progress_percent/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" };
+                                                                if (vErrors === null) {
+                                                                  vErrors = [err203];
+                                                                } else {
+                                                                  vErrors.push(err203);
+                                                                }
+                                                                errors++;
+                                                              }
+                                                            }
+                                                          }
+                                                        }
+                                                        var valid31 = _errs273 === errors;
+                                                      } else {
+                                                        var valid31 = true;
+                                                      }
+                                                      if (valid31) {
+                                                        if (data.message !== void 0) {
+                                                          let data107 = data.message;
+                                                          const _errs275 = errors;
+                                                          if (errors === _errs275) {
+                                                            if (typeof data107 === "string") {
+                                                              if (func5(data107) > 240) {
+                                                                const err204 = { instancePath: instancePath + "/message", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/message/maxLength", keyword: "maxLength", params: { limit: 240 }, message: "must NOT have more than 240 characters" };
+                                                                if (vErrors === null) {
+                                                                  vErrors = [err204];
+                                                                } else {
+                                                                  vErrors.push(err204);
+                                                                }
+                                                                errors++;
+                                                              } else {
+                                                                if (func5(data107) < 1) {
+                                                                  const err205 = { instancePath: instancePath + "/message", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/message/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" };
+                                                                  if (vErrors === null) {
+                                                                    vErrors = [err205];
+                                                                  } else {
+                                                                    vErrors.push(err205);
+                                                                  }
+                                                                  errors++;
+                                                                }
+                                                              }
+                                                            } else {
+                                                              const err206 = { instancePath: instancePath + "/message", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/message/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                              if (vErrors === null) {
+                                                                vErrors = [err206];
+                                                              } else {
+                                                                vErrors.push(err206);
+                                                              }
+                                                              errors++;
+                                                            }
+                                                          }
+                                                          var valid31 = _errs275 === errors;
+                                                        } else {
+                                                          var valid31 = true;
+                                                        }
+                                                        if (valid31) {
+                                                          if (data.is_final !== void 0) {
+                                                            const _errs277 = errors;
+                                                            if (typeof data.is_final !== "boolean") {
+                                                              const err207 = { instancePath: instancePath + "/is_final", schemaPath: "#/$defs/KnowledgeIngestionProgress/properties/is_final/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" };
+                                                              if (vErrors === null) {
+                                                                vErrors = [err207];
+                                                              } else {
+                                                                vErrors.push(err207);
+                                                              }
+                                                              errors++;
+                                                            }
+                                                            var valid31 = _errs277 === errors;
+                                                          } else {
+                                                            var valid31 = true;
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            } else {
+                              const err208 = { instancePath, schemaPath: "#/$defs/KnowledgeIngestionProgress/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+                              if (vErrors === null) {
+                                vErrors = [err208];
+                              } else {
+                                vErrors.push(err208);
+                              }
+                              errors++;
+                            }
+                          }
+                          var _valid0 = _errs249 === errors;
+                          valid0 = valid0 || _valid0;
+                        }
                       }
                     }
                   }
@@ -2697,11 +3152,11 @@ function validate10(data, { instancePath = "", parentData, parentDataProperty, r
     }
   }
   if (!valid0) {
-    const err180 = { instancePath, schemaPath: "#/anyOf", keyword: "anyOf", params: {}, message: "must match a schema in anyOf" };
+    const err209 = { instancePath, schemaPath: "#/anyOf", keyword: "anyOf", params: {}, message: "must match a schema in anyOf" };
     if (vErrors === null) {
-      vErrors = [err180];
+      vErrors = [err209];
     } else {
-      vErrors.push(err180);
+      vErrors.push(err209);
     }
     errors++;
     validate10.errors = vErrors;

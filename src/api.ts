@@ -9,14 +9,14 @@ type Command = Request extends infer R
     : never
   : never;
 
-export async function rpc(command: Command) {
+export async function rpc(command: Command, requestId = crypto.randomUUID()) {
   if (!desktopAvailable)
     throw new Error(
       "Yerel backend için npm run desktop ile masaüstü uygulamasını açın.",
     );
   const request: Request = {
     ...command,
-    request_id: crypto.randomUUID(),
+    request_id: requestId,
     protocol_version: 1,
   };
   const response: unknown = await invoke("backend_request", { request });
