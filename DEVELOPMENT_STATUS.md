@@ -188,3 +188,13 @@ Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırıl
 - 0–100 sınırını zorlayan kapalı Pydantic/TypeScript çalışma zamanı sözleşmesi
 - Rust event allowlist ve React'ta erişilebilir, aşama metinli progress bar
 - 89 Python, 11 JavaScript sözleşme ve 2 etkin Rust testi geçti
+
+## Faz 3 · Kaynak ekleme masaüstü arayüzü
+
+- Tauri native dosya seçici ve webview düzeyinde sürükle-bırak desteği
+- Kayıtlı workspace seçimi, mutlak yolu göreli yola çevirme ve uzantı/gizli yol erken kontrolü
+- En fazla 10 belgelik tekilleştirilmiş kuyruk ve sıralı IPC ingestion
+- Aktif istek kimliğine bağlı canlı ilerleme; tamamlanan dosyayı kuyruktan çıkarma
+- Yeni embedding, yeniden kullanılan parça ve değişmemiş belge sonuç sayaçları
+- Renderer'a dosya okuma izni vermeyen yalnızca `dialog:allow-open` Tauri capability'si
+- 89 Python, 11 JavaScript sözleşme ve 2 etkin Rust testi geçti

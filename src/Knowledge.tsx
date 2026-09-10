@@ -1,9 +1,27 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { BookOpen, BrainCircuit, Check, Database, LoaderCircle, Plus, RefreshCw } from "lucide-react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { open } from "@tauri-apps/plugin-dialog";
+import {
+  BookOpen,
+  BrainCircuit,
+  Check,
+  Database,
+  FileText,
+  LoaderCircle,
+  Plus,
+  RefreshCw,
+  UploadCloud,
+  X,
+} from "lucide-react";
 import { desktopAvailable, rpc } from "./api";
 import validateEvent from "./generated/validate-event.js";
-import type { KnowledgeIngestionProgress, KnowledgeSnapshot } from "./generated/contract";
+import type {
+  KnowledgeIngestionProgress,
+  KnowledgeIngestionResult,
+  KnowledgeSnapshot,
+  Workspace,
+} from "./generated/contract";
 
 const emptySnapshot: KnowledgeSnapshot = {
   collections: [],
@@ -11,14 +29,46 @@ const emptySnapshot: KnowledgeSnapshot = {
   embedding_error: "",
 };
 
-export function Knowledge() {
+const documentExtensions = ["txt", "md", "markdown", "mdown", "mkd"];
+
+function workspaceRelativePath(absolutePath: string, workspacePath: string): string {
+  const candidate = absolutePath.replace(/\\/g, "/").replace(/\/$/, "");
+  const root = workspacePath.replace(/\\/g, "/").replace(/\/$/, "");
+  const windowsPath = /^[A-Za-z]:\//.test(root);
+  const comparableCandidate = windowsPath ? candidate.toLocaleLowerCase("en-US") : candidate;
+  const comparableRoot = windowsPath ? root.toLocaleLowerCase("en-US") : root;
+
+  if (!comparableCandidate.startsWith(`${comparableRoot}/`)) {
+    throw new Error("Seçilen dosya aktif çalışma alanının içinde olmalı.");
+  }
+
+  const relativePath = candidate.slice(root.length + 1);
+  const parts = relativePath.split("/");
+  if (!relativePath || parts.some((part) => !part || part.startsWith("."))) {
+    throw new Error("Gizli dosya ve klasörler bilgi kaynağı olarak eklenemez.");
+  }
+
+  const extension = relativePath.split(".").pop()?.toLocaleLowerCase("en-US") ?? "";
+  if (!documentExtensions.includes(extension)) {
+    throw new Error("Yalnızca TXT ve Markdown belgeleri eklenebilir.");
+  }
+  return relativePath;
+}
+
+export function Knowledge({ workspaces }: { workspaces: Workspace[] }) {
   const [snapshot, setSnapshot] = useState<KnowledgeSnapshot>(emptySnapshot);
   const [name, setName] = useState("");
   const [model, setModel] = useState("");
+  const [collectionId, setCollectionId] = useState("");
+  const [workspaceId, setWorkspaceId] = useState("");
+  const [queuedPaths, setQueuedPaths] = useState<string[]>([]);
+  const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [ingesting, setIngesting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [progress, setProgress] = useState<KnowledgeIngestionProgress | null>(null);
+  const activeRequest = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!desktopAvailable) return;
@@ -30,6 +80,11 @@ export function Knowledge() {
       const knowledge = result as KnowledgeSnapshot;
       setSnapshot(knowledge);
       setModel((current) => current || knowledge.embedding_models[0]?.name || "");
+      setCollectionId((current) =>
+        knowledge.collections.some((collection) => collection.id === current)
+          ? current
+          : knowledge.collections[0]?.id ?? "",
+      );
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -38,6 +93,15 @@ export function Knowledge() {
   }, []);
 
   useEffect(() => void refresh(), [refresh]);
+  useEffect(() => {
+    setWorkspaceId((current) =>
+      workspaces.some((workspace) => workspace.id === current)
+        ? current
+        : workspaces[0]?.id ?? "",
+    );
+  }, [workspaces]);
+  useEffect(() => setQueuedPaths([]), [workspaceId]);
+
   useEffect(() => {
     if (!desktopAvailable) return;
     let disposed = false;
@@ -49,6 +113,7 @@ export function Knowledge() {
         return;
       }
       if (payload.type !== "knowledge_ingestion_progress") return;
+      if (payload.request_id !== activeRequest.current) return;
       setProgress((current) =>
         current && current.request_id === payload.request_id && current.sequence >= payload.sequence
           ? current
@@ -66,6 +131,110 @@ export function Knowledge() {
     };
   }, []);
 
+  const queueAbsolutePaths = useCallback((paths: string[]) => {
+    const workspace = workspaces.find((item) => item.id === workspaceId);
+    if (!workspace) throw new Error("Önce bir çalışma alanı seçin.");
+    const relativePaths = paths.map((path) => workspaceRelativePath(path, workspace.path));
+    const combined = [...new Set([...queuedPaths, ...relativePaths])];
+    if (combined.length > 10) throw new Error("Tek seferde en fazla 10 belge eklenebilir.");
+    setQueuedPaths(combined);
+  }, [queuedPaths, workspaceId, workspaces]);
+
+  useEffect(() => {
+    if (!desktopAvailable) return;
+    let disposed = false;
+    let unlisten: undefined | (() => void);
+    getCurrentWebview().onDragDropEvent((event) => {
+      if (disposed || ingesting) return;
+      if (event.payload.type === "over") {
+        setDragging(true);
+      } else if (event.payload.type === "drop") {
+        setDragging(false);
+        setError("");
+        setNotice("");
+        try {
+          queueAbsolutePaths(event.payload.paths);
+        } catch (reason) {
+          setError(reason instanceof Error ? reason.message : String(reason));
+        }
+      } else {
+        setDragging(false);
+      }
+    })
+      .then((stop) => {
+        if (disposed) stop();
+        else unlisten = stop;
+      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [ingesting, queueAbsolutePaths]);
+
+  async function browseDocuments() {
+    const workspace = workspaces.find((item) => item.id === workspaceId);
+    if (!workspace || ingesting) return;
+    setError("");
+    setNotice("");
+    try {
+      const selection = await open({
+        title: "Bilgi kaynağı seçin",
+        defaultPath: workspace.path,
+        multiple: true,
+        directory: false,
+        canCreateDirectories: false,
+        filters: [{ name: "Metin ve Markdown", extensions: documentExtensions }],
+      });
+      if (!selection) return;
+      queueAbsolutePaths(Array.isArray(selection) ? selection : [selection]);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  async function ingestSources(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!collectionId || !workspaceId || !queuedPaths.length) return;
+    const paths = [...queuedPaths];
+    let embedded = 0;
+    let reused = 0;
+    let unchanged = 0;
+    setIngesting(true);
+    setError("");
+    setNotice("");
+
+    try {
+      for (const path of paths) {
+        const requestId = crypto.randomUUID();
+        activeRequest.current = requestId;
+        setProgress(null);
+        const result = await rpc({
+          method: "knowledge.source.ingest",
+          params: { collection_id: collectionId, workspace_id: workspaceId, path },
+        }, requestId);
+        if (!("status" in result) || !("embedded_count" in result)) {
+          throw new Error("İndeksleme yanıtı geçersiz.");
+        }
+        const ingestion = result as KnowledgeIngestionResult;
+        embedded += ingestion.embedded_count;
+        reused += ingestion.reused_count;
+        unchanged += ingestion.status === "unchanged" ? 1 : 0;
+        setQueuedPaths((current) => current.filter((item) => item !== path));
+      }
+      setNotice(
+        `${paths.length} belge işlendi · ${embedded} yeni embedding · ${reused} parça yeniden kullanıldı` +
+        (unchanged ? ` · ${unchanged} belge değişmemiş` : ""),
+      );
+      await refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      activeRequest.current = null;
+      setIngesting(false);
+    }
+  }
+
   async function createCollection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
@@ -77,7 +246,9 @@ export function Knowledge() {
         params: { name: name.trim(), embedding_provider: "ollama", embedding_model: model },
       });
       if (!("collections" in result)) throw new Error("Bilgi yanıtı geçersiz.");
-      setSnapshot(result as KnowledgeSnapshot);
+      const knowledge = result as KnowledgeSnapshot;
+      setSnapshot(knowledge);
+      setCollectionId(knowledge.collections[knowledge.collections.length - 1]?.id ?? "");
       setName("");
       setNotice("Koleksiyon ve embedding boyutu yerel veritabanına kaydedildi.");
     } catch (reason) {
@@ -86,6 +257,8 @@ export function Knowledge() {
       setLoading(false);
     }
   }
+
+  const selectedWorkspace = workspaces.find((workspace) => workspace.id === workspaceId);
 
   return (
     <div className="knowledge-page">
@@ -96,7 +269,7 @@ export function Knowledge() {
           <p>Belgeleri yerel embedding modelleriyle aranabilir koleksiyonlara hazırlayın.</p>
         </div>
         <button className="icon-button knowledge-refresh" aria-label="Bilgi durumunu yenile"
-          disabled={loading || !desktopAvailable} onClick={() => void refresh()}>
+          disabled={loading || ingesting || !desktopAvailable} onClick={() => void refresh()}>
           <RefreshCw size={17} className={loading ? "spin" : ""} />
         </button>
       </div>
@@ -127,6 +300,63 @@ export function Knowledge() {
           aria-label="Belge indeksleme ilerlemesi" />
       </section>
 
+      <section className="panel knowledge-source-panel">
+        <div className="panel-heading">
+          <div><span className="eyebrow">KAYNAK EKLE</span><h2>Belgeleri yerel indekse aktarın</h2></div>
+          <UploadCloud size={21} />
+        </div>
+        <p className="panel-intro">
+          TXT ve Markdown dosyaları çalışma alanı sınırları içinde doğrulanır ve en fazla 10'lu kuyruklarla işlenir.
+        </p>
+        <form onSubmit={ingestSources}>
+          <div className="knowledge-source-selectors">
+            <label>Çalışma alanı<select value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)}
+              disabled={ingesting || !workspaces.length} required>
+              <option value="" disabled>Çalışma alanı seçin</option>
+              {workspaces.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
+              ))}
+            </select></label>
+            <label>Koleksiyon<select value={collectionId} onChange={(event) => setCollectionId(event.target.value)}
+              disabled={ingesting || !snapshot.collections.length} required>
+              <option value="" disabled>Koleksiyon seçin</option>
+              {snapshot.collections.map((collection) => (
+                <option key={collection.id} value={collection.id}>{collection.name}</option>
+              ))}
+            </select></label>
+          </div>
+
+          <button type="button" className={`knowledge-dropzone${dragging ? " dragging" : ""}`}
+            disabled={ingesting || !workspaceId || !desktopAvailable} onClick={() => void browseDocuments()}>
+            <UploadCloud size={27} />
+            <strong>Belgeleri buraya sürükleyin</strong>
+            <span>{selectedWorkspace
+              ? `${selectedWorkspace.name} içinden dosya seçin`
+              : "Önce bir çalışma alanı seçin"}</span>
+            <span className="button secondary">Dosya seç</span>
+          </button>
+
+          {queuedPaths.length > 0 && <div className="knowledge-file-queue" aria-label="İndeksleme kuyruğu">
+            {queuedPaths.map((path) => (
+              <div key={path}>
+                <FileText size={16} />
+                <span title={path}>{path}</span>
+                <button type="button" aria-label={`${path} dosyasını kuyruktan çıkar`}
+                  disabled={ingesting} onClick={() => setQueuedPaths((current) => current.filter((item) => item !== path))}>
+                  <X size={15} />
+                </button>
+              </div>
+            ))}
+          </div>}
+
+          <button className="button primary knowledge-ingest-button"
+            disabled={ingesting || !queuedPaths.length || !collectionId || !workspaceId || !desktopAvailable}>
+            {ingesting ? <LoaderCircle className="spin" size={16} /> : <Database size={16} />}
+            {ingesting ? "İndeksleniyor…" : `${queuedPaths.length || ""} Belgeyi indeksle`.trim()}
+          </button>
+        </form>
+      </section>
+
       <div className="knowledge-grid">
         <section className="panel knowledge-create">
           <div className="panel-heading">
@@ -143,7 +373,7 @@ export function Knowledge() {
                 <option key={item.name} value={item.name}>{item.name}</option>
               ))}
             </select></label>
-            <button className="button primary" disabled={loading || !model || !desktopAvailable}>
+            <button className="button primary" disabled={loading || ingesting || !model || !desktopAvailable}>
               {loading ? <LoaderCircle className="spin" size={16} /> : <Plus size={16} />}Koleksiyon oluştur
             </button>
           </form>
@@ -169,7 +399,7 @@ export function Knowledge() {
       </div>
 
       <div className="development-note"><Database size={16} /><span>
-        SQLite FTS5 ve taşınabilir float32 vektör depolama hazır. Belge ekleme hattı sonraki dilimde açılacak.
+        Kaynaklar yalnızca kayıtlı çalışma alanlarından okunur; ayrıştırma, embedding ve indeksleme cihazınızda kalır.
       </span></div>
     </div>
   );

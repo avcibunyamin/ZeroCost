@@ -294,8 +294,82 @@ a {
   overflow-wrap: anywhere;
 }
 .knowledge-progress progress { width: 100%; height: 7px; accent-color: #39765d; }
+.knowledge-source-panel { margin-bottom: 18px; }
+.knowledge-source-panel form { display: grid; gap: 14px; margin-top: 18px; }
+.knowledge-source-selectors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.knowledge-source-selectors label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: #66766d;
+  font-size: 10px;
+  font-weight: 600;
+}
+.knowledge-source-selectors select {
+  width: 100%;
+  margin: 0;
+  padding: 11px 12px;
+  border: 1px solid #dfe7e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #405048;
+}
+.knowledge-dropzone {
+  appearance: none;
+  display: flex;
+  min-height: 178px;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+  padding: 22px;
+  border: 1.5px dashed #b8cdbf;
+  border-radius: 12px;
+  background: #f8fbf8;
+  color: #52705e;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+.knowledge-dropzone:hover { border-color: #5f8c72; background: #f2f8f4; }
+.knowledge-dropzone.dragging { border-color: #39765d; background: #eaf5ee; transform: scale(1.005); }
+.knowledge-dropzone:disabled { cursor: not-allowed; opacity: 0.55; }
+.knowledge-dropzone strong { font-size: 13px; }
+.knowledge-dropzone > span:not(.button) { color: #86958b; font-size: 10px; }
+.knowledge-dropzone .button { margin-top: 5px; pointer-events: none; }
+.knowledge-file-queue { display: grid; gap: 7px; }
+.knowledge-file-queue > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 8px 10px 8px 13px;
+  border: 1px solid #e4ebe5;
+  border-radius: 8px;
+  background: #fbfcfb;
+  color: #607368;
+}
+.knowledge-file-queue span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.knowledge-file-queue button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #87958c;
+  cursor: pointer;
+}
+.knowledge-file-queue button:hover { background: #eef3ef; color: #a34d4d; }
+.knowledge-ingest-button { justify-self: end; }
 @media (max-width: 900px) {
   .knowledge-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .knowledge-source-selectors { grid-template-columns: 1fr; }
+  .knowledge-ingest-button { width: 100%; justify-content: center; }
 }
 .main-shell {
   margin-left: 236px;

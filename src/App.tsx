@@ -388,7 +388,7 @@ export default function App() {
           <div hidden={page !== "orchestration"}>
             <Orchestration snapshot={snapshot} />
           </div>
-          {page === "knowledge" && <Knowledge />}
+          {page === "knowledge" && <Knowledge workspaces={snapshot?.workspaces ?? []} />}
           {page === "chat" || page === "orchestration" || page === "knowledge" ? null : page ===
             "overview" ? (
             <>

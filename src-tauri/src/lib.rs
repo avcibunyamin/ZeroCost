@@ -432,6 +432,7 @@ pub fn run() {
     let backend = Backend(Arc::new(Mutex::new(None)));
     let cleanup = backend.clone();
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(backend)
         .invoke_handler(tauri::generate_handler![backend_request])
         .build(tauri::generate_context!())
