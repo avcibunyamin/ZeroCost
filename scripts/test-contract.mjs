@@ -77,6 +77,19 @@ test("knowledge snapshot is typed and closed", () => {
   assert.equal(validate({ ...response, result: { ...response.result, vector: [1, 2] } }), false);
 });
 
+test("knowledge ingestion result is typed and closed", () => {
+  const response = {
+    protocol_version: 1, request_id: "ingest", ok: true,
+    result: {
+      collection_id: "c", workspace_id: "w", path: "docs/guide.md",
+      status: "indexed", chunk_count: 3, embedded_count: 2, reused_count: 1,
+    },
+  };
+  assert.equal(validate(response), true);
+  assert.equal(validate({ ...response, result: { ...response.result, status: "running" } }), false);
+  assert.equal(validate({ ...response, result: { ...response.result, content: "secret" } }), false);
+});
+
 test("orchestration stream attributes every chunk", () => {
   const chunk = { protocol_version: 1, type: "orchestration_chunk", run_id: "run",
     sequence: 1, agent_id: "a", phase: "analysis", token: "x", is_final: false };

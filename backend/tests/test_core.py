@@ -245,6 +245,49 @@ def test_knowledge_collection_ipc_probes_embedding_dimensions(tmp_path):
     asyncio.run(scenario())
 
 
+def test_knowledge_source_ipc_reads_chunks_and_indexes_idempotently(tmp_path):
+    class FakeEmbeddings:
+        calls = []
+
+        def __init__(self, model=''):
+            assert model == 'embed-local'
+
+        async def embed(self, texts):
+            self.calls.append(list(texts))
+            return [[1.0, 0.0, 0.0] for _ in texts]
+
+    async def scenario():
+        root = tmp_path / 'project'
+        (root / 'docs').mkdir(parents=True)
+        content = '# Güvenlik\n\n' + 'Bağlamı koruyan bir cümle. ' * 180
+        (root / 'docs' / 'guide.md').write_text(content, encoding='utf-8')
+        store = Store(tmp_path / 'source-ipc.sqlite3')
+        store.create_workspace(WorkspaceInput(name='Project', path=str(root)))
+        workspace = store.snapshot().workspaces[0]
+        collection_id = store.create_knowledge_collection(KnowledgeCollectionInput(
+            name='Docs', embedding_model='embed-local'), 3)
+        FakeEmbeddings.calls = []
+        service = ChatService(store, embedding_factory=FakeEmbeddings)
+        raw = request('knowledge.source.ingest', collection_id=collection_id,
+                      workspace_id=workspace.id, path='docs/guide.md')
+        response = await service.handle(raw)
+        assert response.ok and response.result.status == 'indexed'
+        assert response.result.path == 'docs/guide.md'
+        assert response.result.chunk_count > 1
+        assert response.result.embedded_count == response.result.chunk_count
+        assert any('Önceki metin bağlamı' in text
+                   for batch in FakeEmbeddings.calls for text in batch)
+
+        unchanged = await service.handle(raw)
+        assert unchanged.ok and unchanged.result.status == 'unchanged'
+        assert unchanged.result.embedded_count == 0
+        assert store.knowledge_snapshot().collections[0].source_count == 1
+        await service.close()
+        store.close()
+
+    asyncio.run(scenario())
+
+
 def test_v8_knowledge_data_migrates_to_versioned_hash_cache(tmp_path):
     root = tmp_path / 'project'
     root.mkdir()

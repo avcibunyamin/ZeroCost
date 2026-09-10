@@ -36,7 +36,8 @@ var require_ucs2length = __commonJS({
 // validate-response.js
 var validate = validate10;
 var validate_response_default = validate10;
-var schema35 = { "additionalProperties": false, "properties": { "protocol_version": { "const": 1, "default": 1, "title": "Protocol Version", "type": "integer" }, "request_id": { "title": "Request Id", "type": "string" }, "ok": { "const": false, "default": false, "title": "Ok", "type": "boolean" }, "code": { "enum": ["invalid_request", "conflict", "not_found", "internal_error"], "title": "Code", "type": "string" }, "message": { "title": "Message", "type": "string" } }, "required": ["protocol_version", "request_id", "ok", "code", "message"], "title": "Failure", "type": "object" };
+var schema36 = { "additionalProperties": false, "properties": { "protocol_version": { "const": 1, "default": 1, "title": "Protocol Version", "type": "integer" }, "request_id": { "title": "Request Id", "type": "string" }, "ok": { "const": false, "default": false, "title": "Ok", "type": "boolean" }, "code": { "enum": ["invalid_request", "conflict", "not_found", "internal_error"], "title": "Code", "type": "string" }, "message": { "title": "Message", "type": "string" } }, "required": ["protocol_version", "request_id", "ok", "code", "message"], "title": "Failure", "type": "object" };
+var schema35 = { "additionalProperties": false, "properties": { "collection_id": { "title": "Collection Id", "type": "string" }, "workspace_id": { "title": "Workspace Id", "type": "string" }, "path": { "title": "Path", "type": "string" }, "status": { "enum": ["indexed", "unchanged"], "title": "Status", "type": "string" }, "chunk_count": { "title": "Chunk Count", "type": "integer" }, "embedded_count": { "title": "Embedded Count", "type": "integer" }, "reused_count": { "title": "Reused Count", "type": "integer" } }, "required": ["collection_id", "workspace_id", "path", "status", "chunk_count", "embedded_count", "reused_count"], "title": "KnowledgeIngestionResult", "type": "object" };
 var schema14 = { "additionalProperties": false, "properties": { "name": { "maxLength": 100, "minLength": 1, "title": "Name", "type": "string" }, "provider": { "enum": ["ollama", "lmstudio", "anthropic", "gemini", "openai"], "title": "Provider", "type": "string" }, "model_id": { "maxLength": 100, "minLength": 1, "title": "Model Id", "type": "string" }, "id": { "title": "Id", "type": "string" }, "status": { "const": "unconfigured", "default": "unconfigured", "title": "Status", "type": "string" } }, "required": ["name", "provider", "model_id", "id", "status"], "title": "Connection", "type": "object" };
 var schema15 = { "additionalProperties": false, "properties": { "name": { "maxLength": 100, "minLength": 1, "title": "Name", "type": "string" }, "role": { "maxLength": 100, "minLength": 1, "title": "Role", "type": "string" }, "connection_id": { "maxLength": 128, "minLength": 1, "title": "Connection Id", "type": "string" }, "instructions": { "default": "", "maxLength": 8e3, "title": "Instructions", "type": "string" }, "id": { "title": "Id", "type": "string" }, "permissions": { "items": { "enum": ["workspace.read", "workspace.write", "terminal.execute"], "type": "string" }, "title": "Permissions", "type": "array" } }, "required": ["name", "role", "connection_id", "instructions", "id", "permissions"], "title": "Agent", "type": "object" };
 var func2 = require_ucs2length().default;
@@ -2613,6 +2614,180 @@ function validate11(data, { instancePath = "", parentData, parentDataProperty, r
                                     }
                                     var _valid0 = _errs42 === errors;
                                     valid1 = valid1 || _valid0;
+                                    if (!valid1) {
+                                      const _errs43 = errors;
+                                      const _errs44 = errors;
+                                      if (errors === _errs44) {
+                                        if (data3 && typeof data3 == "object" && !Array.isArray(data3)) {
+                                          let missing4;
+                                          if (data3.collection_id === void 0 && (missing4 = "collection_id") || data3.workspace_id === void 0 && (missing4 = "workspace_id") || data3.path === void 0 && (missing4 = "path") || data3.status === void 0 && (missing4 = "status") || data3.chunk_count === void 0 && (missing4 = "chunk_count") || data3.embedded_count === void 0 && (missing4 = "embedded_count") || data3.reused_count === void 0 && (missing4 = "reused_count")) {
+                                            const err16 = { instancePath: instancePath + "/result", schemaPath: "#/$defs/KnowledgeIngestionResult/required", keyword: "required", params: { missingProperty: missing4 }, message: "must have required property '" + missing4 + "'" };
+                                            if (vErrors === null) {
+                                              vErrors = [err16];
+                                            } else {
+                                              vErrors.push(err16);
+                                            }
+                                            errors++;
+                                          } else {
+                                            const _errs46 = errors;
+                                            for (const key4 in data3) {
+                                              if (!(key4 === "collection_id" || key4 === "workspace_id" || key4 === "path" || key4 === "status" || key4 === "chunk_count" || key4 === "embedded_count" || key4 === "reused_count")) {
+                                                const err17 = { instancePath: instancePath + "/result", schemaPath: "#/$defs/KnowledgeIngestionResult/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key4 }, message: "must NOT have additional properties" };
+                                                if (vErrors === null) {
+                                                  vErrors = [err17];
+                                                } else {
+                                                  vErrors.push(err17);
+                                                }
+                                                errors++;
+                                                break;
+                                              }
+                                            }
+                                            if (_errs46 === errors) {
+                                              if (data3.collection_id !== void 0) {
+                                                const _errs47 = errors;
+                                                if (typeof data3.collection_id !== "string") {
+                                                  const err18 = { instancePath: instancePath + "/result/collection_id", schemaPath: "#/$defs/KnowledgeIngestionResult/properties/collection_id/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err18];
+                                                  } else {
+                                                    vErrors.push(err18);
+                                                  }
+                                                  errors++;
+                                                }
+                                                var valid9 = _errs47 === errors;
+                                              } else {
+                                                var valid9 = true;
+                                              }
+                                              if (valid9) {
+                                                if (data3.workspace_id !== void 0) {
+                                                  const _errs49 = errors;
+                                                  if (typeof data3.workspace_id !== "string") {
+                                                    const err19 = { instancePath: instancePath + "/result/workspace_id", schemaPath: "#/$defs/KnowledgeIngestionResult/properties/workspace_id/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err19];
+                                                    } else {
+                                                      vErrors.push(err19);
+                                                    }
+                                                    errors++;
+                                                  }
+                                                  var valid9 = _errs49 === errors;
+                                                } else {
+                                                  var valid9 = true;
+                                                }
+                                                if (valid9) {
+                                                  if (data3.path !== void 0) {
+                                                    const _errs51 = errors;
+                                                    if (typeof data3.path !== "string") {
+                                                      const err20 = { instancePath: instancePath + "/result/path", schemaPath: "#/$defs/KnowledgeIngestionResult/properties/path/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err20];
+                                                      } else {
+                                                        vErrors.push(err20);
+                                                      }
+                                                      errors++;
+                                                    }
+                                                    var valid9 = _errs51 === errors;
+                                                  } else {
+                                                    var valid9 = true;
+                                                  }
+                                                  if (valid9) {
+                                                    if (data3.status !== void 0) {
+                                                      let data14 = data3.status;
+                                                      const _errs53 = errors;
+                                                      if (typeof data14 !== "string") {
+                                                        const err21 = { instancePath: instancePath + "/result/status", schemaPath: "#/$defs/KnowledgeIngestionResult/properties/status/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err21];
+                                                        } else {
+                                                          vErrors.push(err21);
+                                                        }
+                                                        errors++;
+                                                      }
+                                                      if (!(data14 === "indexed" || data14 === "unchanged")) {
+                                                        const err22 = { instancePath: instancePath + "/result/status", schemaPath: "#/$defs/KnowledgeIngestionResult/properties/status/enum", keyword: "enum", params: { allowedValues: schema35.properties.status.enum }, message: "must be equal to one of the allowed values" };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err22];
+                                                        } else {
+                                                          vErrors.push(err22);
+                                                        }
+                                                        errors++;
+                                                      }
+                                                      var valid9 = _errs53 === errors;
+                                                    } else {
+                                                      var valid9 = true;
+                                                    }
+                                                    if (valid9) {
+                                                      if (data3.chunk_count !== void 0) {
+                                                        let data15 = data3.chunk_count;
+                                                        const _errs55 = errors;
+                                                        if (!(typeof data15 == "number" && (!(data15 % 1) && !isNaN(data15)))) {
+                                                          const err23 = { instancePath: instancePath + "/result/chunk_count", schemaPath: "#/$defs/KnowledgeIngestionResult/properties/chunk_count/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
+                                                          if (vErrors === null) {
+                                                            vErrors = [err23];
+                                                          } else {
+                                                            vErrors.push(err23);
+                                                          }
+                                                          errors++;
+                                                        }
+                                                        var valid9 = _errs55 === errors;
+                                                      } else {
+                                                        var valid9 = true;
+                                                      }
+                                                      if (valid9) {
+                                                        if (data3.embedded_count !== void 0) {
+                                                          let data16 = data3.embedded_count;
+                                                          const _errs57 = errors;
+                                                          if (!(typeof data16 == "number" && (!(data16 % 1) && !isNaN(data16)))) {
+                                                            const err24 = { instancePath: instancePath + "/result/embedded_count", schemaPath: "#/$defs/KnowledgeIngestionResult/properties/embedded_count/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
+                                                            if (vErrors === null) {
+                                                              vErrors = [err24];
+                                                            } else {
+                                                              vErrors.push(err24);
+                                                            }
+                                                            errors++;
+                                                          }
+                                                          var valid9 = _errs57 === errors;
+                                                        } else {
+                                                          var valid9 = true;
+                                                        }
+                                                        if (valid9) {
+                                                          if (data3.reused_count !== void 0) {
+                                                            let data17 = data3.reused_count;
+                                                            const _errs59 = errors;
+                                                            if (!(typeof data17 == "number" && (!(data17 % 1) && !isNaN(data17)))) {
+                                                              const err25 = { instancePath: instancePath + "/result/reused_count", schemaPath: "#/$defs/KnowledgeIngestionResult/properties/reused_count/type", keyword: "type", params: { type: "integer" }, message: "must be integer" };
+                                                              if (vErrors === null) {
+                                                                vErrors = [err25];
+                                                              } else {
+                                                                vErrors.push(err25);
+                                                              }
+                                                              errors++;
+                                                            }
+                                                            var valid9 = _errs59 === errors;
+                                                          } else {
+                                                            var valid9 = true;
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        } else {
+                                          const err26 = { instancePath: instancePath + "/result", schemaPath: "#/$defs/KnowledgeIngestionResult/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+                                          if (vErrors === null) {
+                                            vErrors = [err26];
+                                          } else {
+                                            vErrors.push(err26);
+                                          }
+                                          errors++;
+                                        }
+                                      }
+                                      var _valid0 = _errs43 === errors;
+                                      valid1 = valid1 || _valid0;
+                                    }
                                   }
                                 }
                               }
@@ -2623,11 +2798,11 @@ function validate11(data, { instancePath = "", parentData, parentDataProperty, r
                     }
                   }
                   if (!valid1) {
-                    const err16 = { instancePath: instancePath + "/result", schemaPath: "#/properties/result/anyOf", keyword: "anyOf", params: {}, message: "must match a schema in anyOf" };
+                    const err27 = { instancePath: instancePath + "/result", schemaPath: "#/properties/result/anyOf", keyword: "anyOf", params: {}, message: "must match a schema in anyOf" };
                     if (vErrors === null) {
-                      vErrors = [err16];
+                      vErrors = [err27];
                     } else {
-                      vErrors.push(err16);
+                      vErrors.push(err27);
                     }
                     errors++;
                     validate11.errors = vErrors;
@@ -2781,7 +2956,7 @@ function validate10(data, { instancePath = "", parentData, parentDataProperty, r
                       errors++;
                     }
                     if (!(data3 === "invalid_request" || data3 === "conflict" || data3 === "not_found" || data3 === "internal_error")) {
-                      const err8 = { instancePath: instancePath + "/code", schemaPath: "#/$defs/Failure/properties/code/enum", keyword: "enum", params: { allowedValues: schema35.properties.code.enum }, message: "must be equal to one of the allowed values" };
+                      const err8 = { instancePath: instancePath + "/code", schemaPath: "#/$defs/Failure/properties/code/enum", keyword: "enum", params: { allowedValues: schema36.properties.code.enum }, message: "must be equal to one of the allowed values" };
                       if (vErrors === null) {
                         vErrors = [err8];
                       } else {

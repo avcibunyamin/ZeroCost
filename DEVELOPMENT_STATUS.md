@@ -169,3 +169,13 @@ Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırıl
 - SQLite/FTS için değişmeyen ana içerik; embedding ve içerik hash'i için etiketli birleşik bağlam
 - Overlap zarfı dahil katı azami boyut ve kaynak satır aralığı bilgisi
 - 81 Python ve 9 JavaScript sözleşme testi geçti
+
+## Faz 3 · Güvenli kaynak ingestion IPC köprüsü
+
+- `knowledge.source.ingest` için Pydantic → TypeScript istek/yanıt sözleşmesi
+- Kayıtlı workspace altında kanonik göreli `.txt`/Markdown yolu; içerik renderer'a taşınmadan Python'da okuma
+- Mutlak/gizli/dışlanan yol, symlink, kaçış, ikili/UTF-8 dışı, boş ve 1 MiB üzeri dosyaları erken reddetme
+- Parser → birleşik chunk → idempotent embedding → atomik SQLite ingestion zinciri
+- Sonuçta indeks durumu ile toplam, yeni ve yeniden kullanılan chunk sayaçları
+- Rust köprüsünde indekslemeye özel 305 saniyelik sınırlı bekleme
+- 88 Python, 10 JavaScript sözleşme ve 2 etkin Rust testi geçti

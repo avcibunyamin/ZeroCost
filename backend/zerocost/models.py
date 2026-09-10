@@ -397,6 +397,34 @@ class KnowledgeCollectionCreateRequest(RequestBase):
     params: KnowledgeCollectionInput
 
 
+class KnowledgeSourceIngestInput(Model):
+    collection_id: Identifier
+    workspace_id: Identifier
+    path: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4096)]
+
+    @field_validator("path")
+    @classmethod
+    def no_null_bytes(cls, value: str) -> str:
+        if "\0" in value:
+            raise ValueError("Invalid path")
+        return value
+
+
+class KnowledgeSourceIngestRequest(RequestBase):
+    method: Literal["knowledge.source.ingest"]
+    params: KnowledgeSourceIngestInput
+
+
+class KnowledgeIngestionResult(Model):
+    collection_id: str
+    workspace_id: str
+    path: str
+    status: Literal["indexed", "unchanged"]
+    chunk_count: int
+    embedded_count: int
+    reused_count: int
+
+
 class OrchestrationMessage(Model):
     sequence: int
     agent_id: str
@@ -543,7 +571,8 @@ Request = Annotated[Union[SnapshotRequest, ConnectionRequest, AgentRequest, Work
                          OrchestrationStartRequest, OrchestrationCancelRequest,
                          OrchestrationApprovalRequest, OrchestrationHistoryRequest,
                          PricingCatalogRequest, KnowledgeSnapshotRequest,
-                         KnowledgeCollectionCreateRequest], Field(discriminator="method")]
+                         KnowledgeCollectionCreateRequest,
+                         KnowledgeSourceIngestRequest], Field(discriminator="method")]
 
 
 class Success(Model):
@@ -552,7 +581,7 @@ class Success(Model):
     ok: Literal[True] = True
     result: Union[Snapshot, OllamaModels, ChatHistory, Accepted, VaultStatus,
                   WorkspaceListing, WorkspaceFile, OrchestrationHistory,
-                  PricingCatalog, KnowledgeSnapshot]
+                  PricingCatalog, KnowledgeSnapshot, KnowledgeIngestionResult]
 
 
 Response = Union[Success, Failure]

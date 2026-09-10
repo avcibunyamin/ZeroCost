@@ -15,6 +15,16 @@ use tauri::{Emitter, Manager};
 type Pending = Arc<Mutex<HashMap<String, mpsc::SyncSender<Result<Value, String>>>>>;
 type EventSink = Arc<dyn Fn(Value) + Send + Sync>;
 
+fn response_timeout_seconds(request: &Value, ready: bool) -> u64 {
+    if request["method"].as_str() == Some("knowledge.source.ingest") {
+        305
+    } else if ready {
+        15
+    } else {
+        45
+    }
+}
+
 struct Sidecar {
     child: Mutex<Child>,
     stdin: Mutex<ChildStdin>,
@@ -186,11 +196,7 @@ impl Sidecar {
             }
             return Err(error);
         }
-        let timeout = if self.ready.load(Ordering::SeqCst) {
-            15
-        } else {
-            45
-        };
+        let timeout = response_timeout_seconds(request, self.ready.load(Ordering::SeqCst));
         let result = rx
             .recv_timeout(Duration::from_secs(timeout))
             .map_err(|_| "Sidecar yanıt vermedi; kaydın durumunu yenileyin.".to_string());
@@ -437,6 +443,22 @@ pub fn run() {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn ingestion_bridge_allows_bounded_long_running_embedding() {
+        assert_eq!(
+            response_timeout_seconds(&json!({"method":"knowledge.source.ingest"}), true),
+            305
+        );
+        assert_eq!(
+            response_timeout_seconds(&json!({"method":"snapshot"}), true),
+            15
+        );
+        assert_eq!(
+            response_timeout_seconds(&json!({"method":"snapshot"}), false),
+            45
+        );
+    }
 
     #[test]
     #[ignore = "Writes synthetic test credentials to the native OS vault, then deletes them"]

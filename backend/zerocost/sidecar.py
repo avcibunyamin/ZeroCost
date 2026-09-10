@@ -19,6 +19,11 @@ from .workspace_tools import inspect_file_size, list_directory, read_file
 from .models import OrchestrationEnd, OrchestrationRoute
 from .pricing import CATALOG_VERSION, catalog, estimate_plan
 from .embeddings import OllamaEmbeddings
+from .chunking import build_semantic_chunks
+from .documents import parse_document
+from .ingestion import KnowledgeIngestor
+from .knowledge_files import read_knowledge_source
+from .models import KnowledgeIngestionResult
 
 MAX_FRAME_BYTES = 64 * 1024
 request_adapter = TypeAdapter(Request)
@@ -165,6 +170,26 @@ class ChatService:
                     raise ValueError('Embedding boyut probu zaman aşımına uğradı.') from None
                 self.store.create_knowledge_collection(request.params, len(vectors[0]))
                 result = self.store.knowledge_snapshot(models)
+            elif request.method == 'knowledge.source.ingest':
+                path, content = read_knowledge_source(
+                    self.store, request.params.workspace_id, request.params.path)
+                chunks = build_semantic_chunks(parse_document(content, path))
+                try:
+                    indexed = await asyncio.wait_for(KnowledgeIngestor(
+                        self.store, self.embedding_factory).index_chunks(
+                            request.params.collection_id, request.params.workspace_id,
+                            path, content, chunks), timeout=300)
+                except asyncio.TimeoutError:
+                    raise ValueError('Belge indeksleme zaman aşımına uğradı.') from None
+                result = KnowledgeIngestionResult(
+                    collection_id=request.params.collection_id,
+                    workspace_id=request.params.workspace_id,
+                    path=path,
+                    status=indexed.status,
+                    chunk_count=indexed.chunk_count,
+                    embedded_count=indexed.embedded_count,
+                    reused_count=indexed.reused_count,
+                )
             elif request.method == 'ollama.models':
                 result = await asyncio.wait_for(OllamaProvider('').list_models(), timeout=8)
             elif request.method == 'chat.history':

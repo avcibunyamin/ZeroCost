@@ -87,6 +87,8 @@ Oversized code bölücüsü özgün backtick/tilde fence açılışını ve dil 
 
 Birleşik chunk hattı semantik paketleme, oversized düz metin bölme, fenced-code bölme ve kontrollü overlap aşamalarını tek sırada çalıştırır. Düz metin yalnız aynı başlık yolundaki önceki cümle kuyruğunu alır; kod yalnız önceki kod parçasının kapsam bildirimi ve son satırlarını taşır. Kod bağlamı embedding girdisinde Markdown alıntısı ve “referans, yeniden tanım değil” etiketiyle ayrılır. Ana içerik ile overlap ayrı tutulur: SQLite/FTS yalnız ana parçayı saklar ve arar, embedding hash'i ile vektör girdisi etiketli birleşik bağlamı kullanır. Tip veya bölüm sınırları aşılmaz ve birleşik girdi 3.200 karakterlik katı sınırı geçmez.
 
+`knowledge.source.ingest` IPC komutu, kayıtlı bir çalışma alanı ve koleksiyon kimliğiyle göreli `.txt`/Markdown yolunu indeksleme hattına bağlar. Backend yolu yeniden doğrular; mutlak, gizli, dışlanan, çalışma alanından kaçan, symlink, ikili, boş, UTF-8 olmayan ve 1 MiB üzerindeki dosyaları Ollama çağrısından önce reddeder. Başarılı yanıt kanonik göreli yolu, durum ile toplam/yeni/yeniden kullanılan chunk sayılarını döndürür. Rust köprüsü uzun yerel embedding işlemleri için 305 saniyelik sınırlı yanıt süresi uygular; renderer dosya içeriğini IPC zarfına taşımaz.
+
 Embedding API sözleşmesi: [Ollama Embeddings](https://docs.ollama.com/capabilities/embeddings) ve [Ollama `/api/embed`](https://docs.ollama.com/api/embed).
 
 ## Pydantic → TypeScript sözleşmesi

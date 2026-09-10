@@ -694,6 +694,54 @@
       "title": "KnowledgeCollectionInput",
       "type": "object"
     },
+    "KnowledgeIngestionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "collection_id": {
+          "title": "Collection Id",
+          "type": "string"
+        },
+        "workspace_id": {
+          "title": "Workspace Id",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "indexed",
+            "unchanged"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "chunk_count": {
+          "title": "Chunk Count",
+          "type": "integer"
+        },
+        "embedded_count": {
+          "title": "Embedded Count",
+          "type": "integer"
+        },
+        "reused_count": {
+          "title": "Reused Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "collection_id",
+        "workspace_id",
+        "path",
+        "status",
+        "chunk_count",
+        "embedded_count",
+        "reused_count"
+      ],
+      "title": "KnowledgeIngestionResult",
+      "type": "object"
+    },
     "KnowledgeSnapshot": {
       "additionalProperties": false,
       "properties": {
@@ -751,6 +799,68 @@
         "method"
       ],
       "title": "KnowledgeSnapshotRequest",
+      "type": "object"
+    },
+    "KnowledgeSourceIngestInput": {
+      "additionalProperties": false,
+      "properties": {
+        "collection_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Collection Id",
+          "type": "string"
+        },
+        "workspace_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Workspace Id",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "collection_id",
+        "workspace_id",
+        "path"
+      ],
+      "title": "KnowledgeSourceIngestInput",
+      "type": "object"
+    },
+    "KnowledgeSourceIngestRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "knowledge.source.ingest",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/KnowledgeSourceIngestInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "KnowledgeSourceIngestRequest",
       "type": "object"
     },
     "ModelsRequest": {
@@ -2226,6 +2336,9 @@
             },
             {
               "$ref": "#/$defs/KnowledgeSnapshot"
+            },
+            {
+              "$ref": "#/$defs/KnowledgeIngestionResult"
             }
           ],
           "title": "Result"
@@ -2697,6 +2810,7 @@
           "connection.create": "#/$defs/ConnectionRequest",
           "knowledge.collection.create": "#/$defs/KnowledgeCollectionCreateRequest",
           "knowledge.snapshot": "#/$defs/KnowledgeSnapshotRequest",
+          "knowledge.source.ingest": "#/$defs/KnowledgeSourceIngestRequest",
           "ollama.models": "#/$defs/ModelsRequest",
           "orchestration.approve": "#/$defs/OrchestrationApprovalRequest",
           "orchestration.cancel": "#/$defs/OrchestrationCancelRequest",
@@ -2768,6 +2882,9 @@
         },
         {
           "$ref": "#/$defs/KnowledgeCollectionCreateRequest"
+        },
+        {
+          "$ref": "#/$defs/KnowledgeSourceIngestRequest"
         }
       ],
       "title": "Request"
