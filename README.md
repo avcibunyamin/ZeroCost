@@ -107,6 +107,8 @@ Ajan başına en fazla 8 paket ve toplam 24.000 karakter skill talimatı atanabi
 
 SQLite şema v11, `skills` ve foreign key/cascade kullanan `skill_assignments` tablolarını ekler. `skill.create`, `skill.assign` ve `skill.unassign` komutları kapalı Pydantic → TypeScript sözleşmesinden geçer; snapshot ajan atamalarını ve manifestleri birlikte döndürür. Skill talimatları kullanıcı tarafından güvenilen yapılandırmadır; RAG belge içeriği gibi güvenilmeyen veri değildir.
 
+Skill, workflow ve executable plugin güven sınırları ile Phase 2/3 geçiş kuralları [ADR-0001](docs/adr/0001-skill-trust-and-capabilities.md) içinde sabitlenmiştir. Temel değişmez kural: skill talimatı ajanın yetkisini genişletemez; üçüncü taraf paketlerde ajan izni, paket sürümüne verilmiş kullanıcı onayının yerine geçmez.
+
 ## Pydantic → TypeScript sözleşmesi
 
 Tek kaynak `backend/zerocost/models.py` dosyasıdır.

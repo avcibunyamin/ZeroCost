@@ -223,4 +223,5 @@ Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırıl
 - Normal sohbet ve LangGraph sistem mesajına sınırlı, açık `<skill>` zarflarıyla talimat ekleme
 - Görev başlangıcında ve onaydan devam ederken ajan izni, etkin araç ve bilgi koleksiyonu kontrolü
 - Skill oluşturma paneli, sağlayıcı önerisi ve ajan kartından atama/sürüm değiştirme arayüzü
+- Skill/workflow/plugin ayrımı, canonical package kimliği ve paket bazlı kullanıcı onayı ADR-0001 ile karara bağlandı
 - 99 Python, 13 JavaScript sözleşme ve 2 etkin Rust testi geçti
