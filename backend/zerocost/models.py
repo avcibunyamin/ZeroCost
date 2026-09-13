@@ -4,6 +4,8 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=128)]
+SemVer = Annotated[str, StringConstraints(strip_whitespace=True, min_length=5, max_length=20,
+                                           pattern=r'^\d+\.\d+\.\d+$')]
 Provider = Literal["ollama", "lmstudio", "anthropic", "gemini", "openai"]
 Permission = Literal["workspace.read", "workspace.write", "terminal.execute"]
 MutationToolName = Literal["workspace.write", "terminal.execute"]
@@ -36,6 +38,49 @@ class AgentInput(Model):
 class Agent(AgentInput):
     id: str
     permissions: list[Permission] = Field(default_factory=list)
+    skill_ids: list[str] = Field(default_factory=list)
+
+
+class SkillPackageInput(Model):
+    name: Name
+    version: SemVer
+    description: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+    instructions: Annotated[str, StringConstraints(max_length=8000)] = ""
+    required_tools: list[ToolName] = Field(default_factory=list, max_length=3)
+    required_permissions: list[Permission] = Field(default_factory=list, max_length=3)
+    provider_hint: Provider | None = None
+
+    @field_validator("required_tools")
+    @classmethod
+    def unique_tools(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("Duplicate tool")
+        return value
+
+    @field_validator("required_permissions")
+    @classmethod
+    def unique_permissions(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("Duplicate permission")
+        return value
+
+    @model_validator(mode="after")
+    def mutation_tools_require_matching_permissions(self):
+        missing = [tool for tool in self.required_tools
+                   if tool in ("workspace.write", "terminal.execute")
+                   and tool not in self.required_permissions]
+        if missing:
+            raise ValueError(f"Missing permission declaration for: {', '.join(missing)}")
+        return self
+
+
+class SkillPackage(SkillPackageInput):
+    id: str
+
+
+class SkillAssignInput(Model):
+    agent_id: Identifier
+    skill_id: Identifier
 
 
 class WorkspaceInput(Model):
@@ -61,6 +106,7 @@ class Snapshot(Model):
     connections: list[Connection]
     agents: list[Agent]
     workspaces: list[Workspace]
+    skills: list[SkillPackage] = Field(default_factory=list)
 
 
 class RequestBase(Model):
@@ -360,6 +406,21 @@ class PricingCatalogRequest(RequestBase):
     method: Literal["pricing.catalog"]
 
 
+class SkillCreateRequest(RequestBase):
+    method: Literal["skill.create"]
+    params: SkillPackageInput
+
+
+class SkillAssignRequest(RequestBase):
+    method: Literal["skill.assign"]
+    params: SkillAssignInput
+
+
+class SkillUnassignRequest(RequestBase):
+    method: Literal["skill.unassign"]
+    params: SkillAssignInput
+
+
 class PriceEntry(Model):
     provider: Literal["anthropic", "gemini"]
     model_pattern: str
@@ -643,7 +704,8 @@ Request = Annotated[Union[SnapshotRequest, ConnectionRequest, AgentRequest, Work
                          ModelsRequest, ChatStartRequest, CancelRequest, HistoryRequest, VaultRequest,
                          OrchestrationStartRequest, OrchestrationCancelRequest,
                          OrchestrationApprovalRequest, OrchestrationHistoryRequest,
-                         PricingCatalogRequest, KnowledgeSnapshotRequest,
+                         PricingCatalogRequest, SkillCreateRequest, SkillAssignRequest,
+                         SkillUnassignRequest, KnowledgeSnapshotRequest,
                          KnowledgeCollectionCreateRequest,
                          KnowledgeSourceIngestRequest, KnowledgeSearchRequest],
                         Field(discriminator="method")]

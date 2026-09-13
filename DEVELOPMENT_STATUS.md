@@ -212,3 +212,15 @@ Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırıl
 - Escape edilmiş `<document>` zarfları ve açık prompt-injection veri sınırı
 - SQLite v10 ile görevde seçilen koleksiyonları kalıcı saklama
 - 95 Python, 12 JavaScript sözleşme ve 2 etkin Rust testi geçti
+
+## Skill paketleri · deklaratif ajan yetenekleri
+
+- Semantik sürüm, açıklama, sistem talimatı, gerekli araç/izin ve sağlayıcı önerisi içeren manifest
+- SQLite v10 → v11 migration; sürüm başına değişmez skill kaydı ve cascade ajan atamaları
+- Aynı paketin yeni sürümüne atomik geçiş; ajan başına 8 paket ve 24.000 karakter bağlam sınırı
+- `skill.create`, `skill.assign` ve `skill.unassign` için kapalı Pydantic → TypeScript IPC sözleşmesi
+- Yazma/terminal aracı ile izin beyanının model seviyesinde tutarlılık kontrolü
+- Normal sohbet ve LangGraph sistem mesajına sınırlı, açık `<skill>` zarflarıyla talimat ekleme
+- Görev başlangıcında ve onaydan devam ederken ajan izni, etkin araç ve bilgi koleksiyonu kontrolü
+- Skill oluşturma paneli, sağlayıcı önerisi ve ajan kartından atama/sürüm değiştirme arayüzü
+- 99 Python, 13 JavaScript sözleşme ve 2 etkin Rust testi geçti

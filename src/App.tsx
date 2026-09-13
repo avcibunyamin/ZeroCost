@@ -14,6 +14,7 @@ import {
   GitBranch,
   LayoutDashboard,
   LoaderCircle,
+  Package,
   Plus,
   RefreshCw,
   Settings2,
@@ -31,6 +32,8 @@ import type {
   WorkspaceInput,
   Permission,
   AgentPermissionsInput,
+  SkillPackageInput,
+  SkillAssignInput,
 } from "./generated/contract";
 import "./App.css";
 import { Chat } from "./Chat";
@@ -44,16 +47,18 @@ type Page =
   | "knowledge"
   | "overview"
   | "agents"
+  | "skills"
   | "connections"
   | "workspaces"
   | "system";
-type Modal = "connection" | "agent" | "workspace" | null;
+type Modal = "connection" | "agent" | "workspace" | "skill" | null;
 const navigation = [
   { id: "overview", label: "Genel bakış", icon: LayoutDashboard },
   { id: "chat", label: "Sohbet", icon: MessageSquare },
   { id: "orchestration", label: "Ajan masası", icon: Users },
   { id: "knowledge", label: "Bilgi yönetimi", icon: BookOpen },
   { id: "agents", label: "Ajanlar", icon: Bot },
+  { id: "skills", label: "Skill paketleri", icon: Package },
   { id: "connections", label: "Model bağlantıları", icon: GitBranch },
   { id: "workspaces", label: "Çalışma alanları", icon: Folder },
   { id: "system", label: "Sistem", icon: Settings2 },
@@ -119,6 +124,20 @@ export default function App() {
           instructions: field("instructions"),
         };
         result = await send({ method: "agent.create", params });
+      } else if (modal === "skill") {
+        const tools = Array.from(data.getAll("required_tools")) as SkillPackageInput["required_tools"];
+        const perms = Array.from(data.getAll("required_permissions")) as SkillPackageInput["required_permissions"];
+        const hint = field("provider_hint");
+        const params: SkillPackageInput = {
+          name: field("name"),
+          version: field("version") || "1.0.0",
+          description: field("description"),
+          instructions: field("instructions"),
+          required_tools: tools,
+          required_permissions: perms,
+          provider_hint: (hint || null) as SkillPackageInput["provider_hint"],
+        };
+        result = await send({ method: "skill.create", params });
       } else {
         const params: WorkspaceInput = {
           name: field("name"),
@@ -163,10 +182,31 @@ export default function App() {
       setLoading(false);
     }
   }
+  async function toggleSkill(agentId: string, skillId: string) {
+    setLoading(true);
+    setError("");
+    const agent = snapshot?.agents.find((item) => item.id === agentId);
+    const assigned = agent?.skill_ids.includes(skillId);
+    try {
+      const params: SkillAssignInput = { agent_id: agentId, skill_id: skillId };
+      setSnapshot(
+        await send({
+          method: assigned ? "skill.unassign" : "skill.assign",
+          params,
+        }),
+      );
+      setNotice(assigned ? "Skill kaldırıldı." : "Skill atandı.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
   const counts = {
     agents: snapshot?.agents.length ?? 0,
     connections: snapshot?.connections.length ?? 0,
     workspaces: snapshot?.workspaces.length ?? 0,
+    skills: snapshot?.skills?.length ?? 0,
   };
   const primary = (label: string, target: Modal, disabled = false) => (
     <button
@@ -232,6 +272,15 @@ export default function App() {
                 </button>
               ),
             )}
+            {(snapshot?.skills ?? []).map((skill) => (
+              <button className="permission-button" disabled={loading} key={`skill-${skill.id}`}
+                aria-pressed={agent.skill_ids.includes(skill.id)}
+                onClick={() => void toggleSkill(agent.id, skill.id)}>
+                <Package size={14} />
+                {skill.name}
+                {agent.skill_ids.includes(skill.id) ? " ✓" : ""}
+              </button>
+            ))}
           </footer>
         </article>
       ))}
@@ -389,7 +438,64 @@ export default function App() {
             <Orchestration snapshot={snapshot} />
           </div>
           {page === "knowledge" && <Knowledge workspaces={snapshot?.workspaces ?? []} />}
-          {page === "chat" || page === "orchestration" || page === "knowledge" ? null : page ===
+          {page === "chat" || page === "orchestration" || page === "knowledge" ? null : page === "skills" ? (
+            <>
+              <div className="page-heading">
+                <div>
+                  <div className="eyebrow">AJAN YETENEKLERİ</div>
+                  <h1>Skill paketleri</h1>
+                  <p>
+                    Ajanlarınıza atanabilir yetenek ve talimat paketleri tanımlayın.
+                  </p>
+                </div>
+                {primary("Skill ekle", "skill")}
+              </div>
+              <section className="panel">
+                {counts.skills ? (
+                  <div className="agent-grid">
+                    {snapshot?.skills?.map((skill) => (
+                      <article className="agent-card" key={skill.id}>
+                        <div className="agent-avatar tone-1">
+                          <Package size={24} />
+                        </div>
+                        <span className="badge positive">v{skill.version}</span>
+                        <h3>{skill.name}</h3>
+                        <p>{skill.description}</p>
+                        {skill.required_tools.length > 0 && (
+                          <div className="agent-model">
+                            <Cpu size={14} />
+                            Araçlar: {skill.required_tools.join(", ")}
+                          </div>
+                        )}
+                        {skill.required_permissions.length > 0 && (
+                          <div className="agent-model">
+                            <ShieldCheck size={14} />
+                            İzinler: {skill.required_permissions.join(", ")}
+                          </div>
+                        )}
+                        {skill.provider_hint && (
+                          <div className="agent-model">
+                            <GitBranch size={14} />
+                            Önerilen: {skill.provider_hint}
+                          </div>
+                        )}
+                        <footer>
+                          <span className="badge neutral">
+                            {snapshot?.agents.filter((a) => a.skill_ids.includes(skill.id)).length ?? 0} ajan
+                          </span>
+                        </footer>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  empty(
+                    "Henüz skill tanımlanmadı",
+                    "Ajanlarınıza atanabilir yetenek paketleri oluşturun.",
+                  )
+                )}
+              </section>
+            </>
+          ) : page ===
             "overview" ? (
             <>
               <div className="page-heading">
@@ -574,7 +680,9 @@ export default function App() {
                         ? "Aynı sağlayıcı için birden fazla bağlantı profili tanımlayın."
                         : page === "workspaces"
                           ? "Projelerinizi bu cihazdaki mevcut klasörlerle ilişkilendirin."
-                          : "Masaüstü uygulamasının gerçek bağlantı ve geliştirme durumu."}
+                          : page === "system"
+                            ? "Masaüstü uygulamasının gerçek bağlantı ve geliştirme durumu."
+                            : ""}
                   </p>
                 </div>
                 {page === "agents"
@@ -731,7 +839,9 @@ export default function App() {
                   ? "Model bağlantısı ekle"
                   : modal === "agent"
                     ? "Ajan tanımla"
-                    : "Çalışma alanı ekle"}
+                    : modal === "skill"
+                      ? "Skill paketi oluştur"
+                      : "Çalışma alanı ekle"}
               </h2>
               <button
                 className="icon-button"
@@ -755,7 +865,9 @@ export default function App() {
                       ? "Örn. Kod incelemeci"
                       : modal === "connection"
                         ? "Örn. Yerel Qwen"
-                        : "Örn. Ana projem"
+                        : modal === "skill"
+                          ? "Örn. Code Review"
+                          : "Örn. Ana projem"
                   }
                 />
               </label>
@@ -819,6 +931,76 @@ export default function App() {
                   </label>
                   <p className="form-note">
                     Yeni ajanların dosya veya terminal yetkisi yoktur.
+                  </p>
+                </>
+              )}
+              {modal === "skill" && (
+                <>
+                  <label>
+                    Sürüm
+                    <input
+                      name="version"
+                      defaultValue="1.0.0"
+                      maxLength={20}
+                      placeholder="1.0.0"
+                      pattern="\d+\.\d+\.\d+"
+                    />
+                  </label>
+                  <label>
+                    Açıklama
+                    <input
+                      name="description"
+                      required
+                      maxLength={500}
+                      placeholder="Bu skill ne yapar?"
+                    />
+                  </label>
+                  <label>
+                    Talimatlar
+                    <textarea
+                      name="instructions"
+                      maxLength={8000}
+                      rows={4}
+                      placeholder="Ajan bu skill etkinken nasıl davranmalı…"
+                    />
+                  </label>
+                  <label>
+                    Önerilen sağlayıcı
+                    <select name="provider_hint" defaultValue="">
+                      <option value="">Fark etmez</option>
+                      <option value="ollama">Ollama</option>
+                      <option value="lmstudio">LM Studio</option>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="gemini">Gemini</option>
+                      <option value="openai">OpenAI</option>
+                    </select>
+                  </label>
+                  <fieldset>
+                    <legend>Gerekli araçlar</legend>
+                    {(["workspace.write", "terminal.execute", "knowledge.search"] as const).map(
+                      (tool) => (
+                        <label className="agent-choice" key={tool}>
+                          <input type="checkbox" name="required_tools" value={tool} />
+                          <span>{tool}</span>
+                        </label>
+                      ),
+                    )}
+                  </fieldset>
+                  <fieldset>
+                    <legend>Gerekli izinler</legend>
+                    {(["workspace.read", "workspace.write", "terminal.execute"] as Permission[]).map(
+                      (perm) => (
+                        <label className="agent-choice" key={perm}>
+                          <input type="checkbox" name="required_permissions" value={perm} />
+                          <span>{perm}</span>
+                        </label>
+                      ),
+                    )}
+                  </fieldset>
+                  <p className="form-note">
+                    Yazma veya terminal aracı seçerseniz aynı adlı izni de seçin.
+                    Gereksinimler görev başlarken yeniden kontrol edilir; talimatlar
+                    ajan bağlamına otomatik eklenir.
                   </p>
                 </>
               )}

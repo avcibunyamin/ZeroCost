@@ -20,7 +20,7 @@ Windows'ta Python komutu `.venv\Scripts\python.exe` olur. Node yardımcı betikl
 
 ## Bu sürümde çalışanlar
 
-- Masaüstü kontrol paneli; bağlantı, ajan ve çalışma alanı formları.
+- Masaüstü kontrol paneli; bağlantı, ajan, skill paketi ve çalışma alanı formları.
 - Aynı sağlayıcı için bağımsız model bağlantı profilleri.
 - Ajanın bağlantıyla ilişkilendirilmesi; rol ve talimat kaydı.
 - Mevcut klasörlerin mutlak ve çözümlenmiş yollarla kaydı.
@@ -99,6 +99,14 @@ Ajan masasında en fazla üç bilgi koleksiyonu açıkça seçilebilir. Koordina
 
 Embedding API sözleşmesi: [Ollama Embeddings](https://docs.ollama.com/capabilities/embeddings) ve [Ollama `/api/embed`](https://docs.ollama.com/api/embed).
 
+## Skill paketleri
+
+**Skill paketleri** ekranında ad, semantik sürüm, açıklama, sistem talimatı, gerekli araçlar/izinler ve isteğe bağlı sağlayıcı önerisi içeren deklaratif manifestler oluşturulur. Paket sürümleri değiştirilemez kayıtlar olarak tutulur; aynı ad ve sürüm ikinci kez eklenemez. Aynı paketin yeni sürümü ajana atandığında eski sürüm tek transaction içinde değiştirilir. Sağlayıcı alanı router için geleceğe dönük bir öneridir ve mevcut deterministik rotayı zorlamaz.
+
+Ajan başına en fazla 8 paket ve toplam 24.000 karakter skill talimatı atanabilir. Talimatlar normal sohbet ve LangGraph çağrılarında açık `<skill>` sınırlarıyla sistem mesajına eklenir. `workspace.write` veya `terminal.execute` isteyen manifest aynı ajan iznini de beyan etmek zorundadır. Görev başlarken seçilen ajanların izinleri ve görev bazında etkin araçları yeniden doğrulanır; `knowledge.search` isteyen skill için en az bir bilgi koleksiyonu seçilmelidir. Araç gerektiren skill normal sohbet ekranında kapalı davranışla reddedilir ve kullanıcı Ajan masasına yönlendirilir. Onay bekleyen görev sürdürülürken gereksinimler tekrar kontrol edilir.
+
+SQLite şema v11, `skills` ve foreign key/cascade kullanan `skill_assignments` tablolarını ekler. `skill.create`, `skill.assign` ve `skill.unassign` komutları kapalı Pydantic → TypeScript sözleşmesinden geçer; snapshot ajan atamalarını ve manifestleri birlikte döndürür. Skill talimatları kullanıcı tarafından güvenilen yapılandırmadır; RAG belge içeriği gibi güvenilmeyen veri değildir.
+
 ## Pydantic → TypeScript sözleşmesi
 
 Tek kaynak `backend/zerocost/models.py` dosyasıdır.
@@ -112,7 +120,7 @@ npm run schema:check
 
 Çoklu ajan görevleri manuel veya deterministik otomatik routing kullanır. Router kararı ve gerekçesi görev kaydında tutulur. Çağrı bütçesi, görev başlamadan önce gerekli model çağrılarını sınırlar; çıktı bütçesi her sağlayıcı isteğine doğrudan uygulanır. Çalışma alanı dosyaları seçildiyse LangGraph görevi `waiting_approval` checkpoint'inde durur. İçerik ancak kullanıcı somut dosya listesini onayladıktan sonra okunur; ret halinde hiçbir model çağrısı yapılmaz.
 
-Protokol v1 yapılandırma komutlarına ek olarak sohbet, kasa, workspace okuma, `pricing.catalog`, `knowledge.snapshot`, `knowledge.collection.create` ve `orchestration.start/approve/cancel/history` komutlarını sunar. Her komut `request_id` ve `protocol_version` içerir. Akış parçaları `run_id`, monoton `sequence`, olay türü, ajan/aşama kimliği ve terminal işareti taşır. Yanıtlar ile akış olayları Pydantic'ten üretilen ayrı çalışma zamanı doğrulayıcılarından geçer.
+Protokol v1 yapılandırma komutlarına ek olarak sohbet, kasa, workspace okuma, `pricing.catalog`, `skill.create/assign/unassign`, `knowledge.snapshot`, `knowledge.collection.create` ve `orchestration.start/approve/cancel/history` komutlarını sunar. Her komut `request_id` ve `protocol_version` içerir. Akış parçaları `run_id`, monoton `sequence`, olay türü, ajan/aşama kimliği ve terminal işareti taşır. Yanıtlar ile akış olayları Pydantic'ten üretilen ayrı çalışma zamanı doğrulayıcılarından geçer.
 
 ## Veri ve süreç yaşam döngüsü
 
@@ -135,7 +143,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 ```
 
-Backend testleri hesap/ajan ayrımı, foreign key/unique, yeniden açılışta kalıcılık, protokol reddi, klasör sınırları, ajan izinleri, ilerideki DB sürümünü koruma, gerçek stdin/stdout iletişimi, model keşfi, NDJSON ayrıştırma, sıralı akış, iptal, çoklu ajan durum geçişleri, fiyat kataloğu, ön kontrol bütçesi, gerçek token bazlı maliyet toplama ve kısmi hata kaydını kapsar. Contract testleri üretilmiş yanıt ve ajan/aşama olay doğrulayıcılarının bozuk veriyi reddettiğini denetler. Paketlenmiş Python 3.12 sidecar ayrıca iki geçici Ollama ajanıyla gerçek üç aşamalı görev üzerinden doğrulanmıştır.
+Backend testleri hesap/ajan ayrımı, foreign key/unique, yeniden açılışta kalıcılık, protokol reddi, klasör sınırları, ajan izinleri, skill sürüm/atama/gereksinim sınırları, ilerideki DB sürümünü koruma, gerçek stdin/stdout iletişimi, model keşfi, NDJSON ayrıştırma, sıralı akış, iptal, çoklu ajan durum geçişleri, fiyat kataloğu, ön kontrol bütçesi, gerçek token bazlı maliyet toplama ve kısmi hata kaydını kapsar. Contract testleri üretilmiş yanıt, skill manifesti ve ajan/aşama olay doğrulayıcılarının bozuk veriyi reddettiğini denetler. Paketlenmiş Python 3.12 sidecar ayrıca iki geçici Ollama ajanıyla gerçek üç aşamalı görev üzerinden doğrulanmıştır.
 
 ## Masaüstü paketi
 
@@ -147,6 +155,6 @@ macOS uygulaması `src-tauri/target/release/bundle/macos/ZeroCost.app` altında 
 
 ## Sonraki geliştirme dilimi
 
-1. Skill paket manifesti, sürümleme ve izin beyanları.
+1. Skill paketlerinden sürümlü görev şablonları ve workflow tarifleri üretme.
 2. Kesilmiş üretim düğümünü kontrollü yeniden deneme ve kısmi görev devamı.
-3. Sağlayıcı cache/batch tarifeleri ve kullanıcıya özel fiyat profilleri.
+3. Üçüncü taraf plugin manifesti, imza doğrulaması ve sandbox sınırı.

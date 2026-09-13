@@ -19,6 +19,7 @@ from .terminal_tools import execute_command, prepare_command
 from .pricing import TokenUsage, cost_microusd
 from .embeddings import OllamaEmbeddings
 from .knowledge_search import HybridKnowledgeSearch, format_search_context
+from .skills import assigned_skills, skill_prompt
 
 
 class GraphState(TypedDict):
@@ -109,11 +110,21 @@ class OrchestrationEngine:
             raise ValueError('Seçilen bağlam toplam 128.000 karakter sınırını aşıyor.')
         return context
 
+    def _skill_instructions(self, agent_id: str) -> str:
+        agent = self.store.agent(agent_id)
+        if agent is None:
+            raise ValueError('Ajan bulunamadı.')
+        return skill_prompt(assigned_skills(self.store, agent))
+
     async def _generate(self, run_id: str, state: GraphState, agent_id: str, phase: str,
                         credentials: dict[str, str], prompt: str):
         agent, connection = self._agent_connection(agent_id)
         provider = self.provider_factory(connection.provider, connection.model_id)
-        messages = [Message(role='system', content=f'Rol: {agent.role}\n{agent.instructions}'),
+        system_content = f'Rol: {agent.role}\n{agent.instructions}'
+        skill_block = self._skill_instructions(agent_id)
+        if skill_block:
+            system_content += f'\n\n{skill_block}'
+        messages = [Message(role='system', content=system_content),
                     Message(role='user', content=prompt)]
         content = ''
         sequence = max(state['event_sequence'], self.event_sequences.get(run_id, 0))

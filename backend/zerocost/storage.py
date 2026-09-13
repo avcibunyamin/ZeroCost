@@ -7,9 +7,10 @@ import math
 import sqlite3
 import struct
 from uuid import uuid4
-from .models import Agent, AgentInput, Connection, ConnectionInput, Snapshot, Workspace, WorkspaceInput
+from .models import (Agent, AgentInput, Connection, ConnectionInput, SkillPackage,
+                     SkillPackageInput, Snapshot, Workspace, WorkspaceInput)
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 
 class Store:
@@ -218,6 +219,31 @@ class Store:
                         knowledge_collection_ids TEXT NOT NULL DEFAULT '[]'""")
                 self.db.execute("PRAGMA user_version=10")
 
+        if current < 11:
+            self.db.executescript("""
+                BEGIN IMMEDIATE;
+                CREATE TABLE skills (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    version TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    instructions TEXT NOT NULL DEFAULT '',
+                    required_tools TEXT NOT NULL DEFAULT '[]',
+                    required_permissions TEXT NOT NULL DEFAULT '[]',
+                    provider_hint TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(name, version)
+                );
+                CREATE TABLE skill_assignments (
+                    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+                    skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+                    PRIMARY KEY(agent_id, skill_id)
+                );
+                CREATE INDEX skill_assignments_skill ON skill_assignments(skill_id);
+                PRAGMA user_version=11;
+                COMMIT;
+            """)
+
     def close(self):
         self.db.close()
 
@@ -226,9 +252,11 @@ class Store:
             database_version=self.db.execute("PRAGMA user_version").fetchone()[0],
             connections=[Connection(**dict(row)) for row in self.db.execute("SELECT * FROM connections ORDER BY rowid")],
             agents=[Agent(**dict(row), permissions=[p[0] for p in self.db.execute(
-                "SELECT permission FROM agent_permissions WHERE agent_id=? ORDER BY permission", (row["id"],))])
+                "SELECT permission FROM agent_permissions WHERE agent_id=? ORDER BY permission", (row["id"],))],
+                skill_ids=self.agent_skill_ids(row["id"]))
                     for row in self.db.execute("SELECT * FROM agents ORDER BY rowid")],
             workspaces=[Workspace(**dict(row)) for row in self.db.execute("SELECT * FROM workspaces ORDER BY rowid")],
+            skills=self.all_skills(),
         )
 
     def create_connection(self, value: ConnectionInput):
@@ -258,6 +286,75 @@ class Store:
             self.db.execute("DELETE FROM agent_permissions WHERE agent_id=?", (agent_id,))
             self.db.executemany("INSERT INTO agent_permissions VALUES (?,?)",
                                 [(agent_id, permission) for permission in permissions])
+
+    def create_skill(self, value: SkillPackageInput) -> str:
+        identifier = str(uuid4())
+        with self.db:
+            self.db.execute("""INSERT INTO skills
+                (id,name,version,description,instructions,required_tools,required_permissions,provider_hint)
+                VALUES (?,?,?,?,?,?,?,?)""",
+                (identifier, value.name, value.version, value.description, value.instructions,
+                 json.dumps(value.required_tools), json.dumps(value.required_permissions),
+                 value.provider_hint))
+        return identifier
+
+    def assign_skill(self, agent_id: str, skill_id: str):
+        if not self.db.execute("SELECT 1 FROM agents WHERE id=?", (agent_id,)).fetchone():
+            raise ValueError("Ajan bulunamadı.")
+        skill = self.db.execute("SELECT name FROM skills WHERE id=?", (skill_id,)).fetchone()
+        if not skill:
+            raise ValueError("Skill paketi bulunamadı.")
+        with self.db:
+            current = self.db.execute("""SELECT s.id,s.name,length(s.instructions) AS instruction_size
+                FROM skill_assignments sa JOIN skills s ON s.id=sa.skill_id
+                WHERE sa.agent_id=?""", (agent_id,)).fetchall()
+            replacing = [row['id'] for row in current if row['name'] == skill['name']]
+            remaining = [row for row in current if row['id'] not in replacing]
+            target_size = self.db.execute(
+                "SELECT length(instructions) FROM skills WHERE id=?", (skill_id,)).fetchone()[0]
+            if len(remaining) >= 8:
+                raise ValueError("Bir ajana en fazla 8 skill paketi atanabilir.")
+            if sum(row['instruction_size'] for row in remaining) + target_size > 24000:
+                raise ValueError("Atanan skill talimatları toplam 24.000 karakter sınırını aşıyor.")
+            if replacing:
+                self.db.executemany(
+                    "DELETE FROM skill_assignments WHERE agent_id=? AND skill_id=?",
+                    [(agent_id, item) for item in replacing])
+            self.db.execute("INSERT OR IGNORE INTO skill_assignments VALUES (?,?)",
+                            (agent_id, skill_id))
+
+    def unassign_skill(self, agent_id: str, skill_id: str):
+        if not self.db.execute("SELECT 1 FROM agents WHERE id=?", (agent_id,)).fetchone():
+            raise ValueError("Ajan bulunamadı.")
+        if not self.db.execute("SELECT 1 FROM skills WHERE id=?", (skill_id,)).fetchone():
+            raise ValueError("Skill paketi bulunamadı.")
+        with self.db:
+            self.db.execute("DELETE FROM skill_assignments WHERE agent_id=? AND skill_id=?",
+                            (agent_id, skill_id))
+
+    def agent_skill_ids(self, agent_id: str) -> list[str]:
+        return [row[0] for row in self.db.execute(
+            """SELECT s.id FROM skill_assignments sa JOIN skills s ON s.id=sa.skill_id
+               WHERE sa.agent_id=? ORDER BY s.name,s.version,s.rowid""",
+            (agent_id,))]
+
+    def skill(self, skill_id: str) -> SkillPackage | None:
+        row = self.db.execute("SELECT * FROM skills WHERE id=?", (skill_id,)).fetchone()
+        if row is None:
+            return None
+        return SkillPackage(id=row['id'], name=row['name'], version=row['version'],
+                            description=row['description'], instructions=row['instructions'],
+                            required_tools=json.loads(row['required_tools']),
+                            required_permissions=json.loads(row['required_permissions']),
+                            provider_hint=row['provider_hint'])
+
+    def all_skills(self) -> list[SkillPackage]:
+        return [SkillPackage(id=row['id'], name=row['name'], version=row['version'],
+                             description=row['description'], instructions=row['instructions'],
+                             required_tools=json.loads(row['required_tools']),
+                             required_permissions=json.loads(row['required_permissions']),
+                             provider_hint=row['provider_hint'])
+                for row in self.db.execute("SELECT * FROM skills ORDER BY created_at,rowid")]
 
     def agent(self, agent_id: str) -> Agent | None:
         return next((agent for agent in self.snapshot().agents if agent.id == agent_id), None)

@@ -7,7 +7,8 @@ import sys
 import pytest
 import asyncio
 from zerocost.models import (AgentInput, ConnectionInput, WorkspaceInput,
-                             KnowledgeCollectionInput, KnowledgeIngestionProgress)
+                             KnowledgeCollectionInput, KnowledgeIngestionProgress,
+                             SkillPackageInput)
 from zerocost.sidecar import ChatService, dispatch
 from zerocost.storage import Store
 from zerocost.providers.base import Message, ProviderError
@@ -172,13 +173,15 @@ def test_v4_orchestration_migrates_with_budget_defaults(tmp_path):
     store.db.execute('DROP TABLE knowledge_chunks')
     store.db.execute('DROP TABLE knowledge_sources')
     store.db.execute('DROP TABLE knowledge_collections')
+    store.db.execute('DROP TABLE skill_assignments')
+    store.db.execute('DROP TABLE skills')
     store.db.execute('PRAGMA user_version=4')
     store.db.commit()
     store.close()
 
     migrated = Store(path)
     run = migrated.orchestration_history().runs[0]
-    assert migrated.snapshot().database_version == 10
+    assert migrated.snapshot().database_version == 11
     assert run.routing_mode == 'manual' and run.max_model_calls == 5
     assert run.agent_ids == [a.id for a in agents]
     assert migrated.db.execute('PRAGMA foreign_key_check').fetchall() == []
@@ -322,13 +325,15 @@ def test_v8_knowledge_data_migrates_to_versioned_hash_cache(tmp_path):
     store.db.execute('DROP INDEX knowledge_chunks_content_hash')
     store.db.execute('ALTER TABLE knowledge_chunks DROP COLUMN content_hash')
     store.db.execute('ALTER TABLE knowledge_sources DROP COLUMN index_version')
+    store.db.execute('DROP TABLE skill_assignments')
+    store.db.execute('DROP TABLE skills')
     store.db.execute('PRAGMA user_version=8')
     store.db.commit()
     store.close()
 
     migrated = Store(path)
     source = migrated.knowledge_source_hash(collection_id, workspace.id, 'legacy.md')
-    assert migrated.snapshot().database_version == 10
+    assert migrated.snapshot().database_version == 11
     assert source == {'content_hash': 'old-hash', 'status': 'ready', 'index_version': 'legacy-v8'}
     assert migrated.search_knowledge_fts(collection_id, 'korunan')[0]['content'] == 'korunan içerik'
     assert migrated.db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
@@ -437,6 +442,111 @@ def configured_store(tmp_path):
     store.create_agent(AgentInput(name='Helper', role='Yardımcı', connection_id=connection.id,
                                   instructions='Kısa yanıt ver.'))
     return store, store.snapshot().agents[0]
+
+
+def test_skill_manifest_versions_assignment_and_contract_validation(tmp_path):
+    store, agent = configured_store(tmp_path)
+    invalid = dispatch(store, request(
+        'skill.create', name='Writer', version='1.0.0', description='Writes files',
+        instructions='Write carefully.', required_tools=['workspace.write'],
+        required_permissions=[], provider_hint='ollama'))
+    assert not invalid.ok and invalid.code == 'invalid_request'
+
+    identifiers = []
+    for version in ('1.0.0', '2.0.0'):
+        created = dispatch(store, request(
+            'skill.create', name='Reviewer', version=version, description='Reviews code',
+            instructions=f'Review policy {version}', required_tools=[],
+            required_permissions=[], provider_hint='ollama'))
+        assert created.ok
+        identifiers.append(next(skill.id for skill in created.result.skills
+                                if skill.name == 'Reviewer' and skill.version == version))
+    duplicate = dispatch(store, request(
+        'skill.create', name='Reviewer', version='2.0.0', description='Duplicate',
+        instructions='', required_tools=[], required_permissions=[], provider_hint=None))
+    assert not duplicate.ok and duplicate.code == 'conflict'
+
+    assert dispatch(store, request('skill.assign', agent_id=agent.id,
+                                   skill_id=identifiers[0])).ok
+    upgraded = dispatch(store, request('skill.assign', agent_id=agent.id,
+                                       skill_id=identifiers[1]))
+    assert upgraded.ok
+    assert upgraded.result.agents[0].skill_ids == [identifiers[1]]
+    assert dispatch(store, request('skill.unassign', agent_id=agent.id,
+                                   skill_id=identifiers[1])).ok
+    assert store.snapshot().agents[0].skill_ids == []
+    store.close()
+
+
+def test_skill_assignment_bounds_total_prompt_size(tmp_path):
+    store, agent = configured_store(tmp_path)
+    for index in range(3):
+        skill_id = store.create_skill(SkillPackageInput(
+            name=f'Large {index}', version='1.0.0', description='Large prompt',
+            instructions='x' * 8000))
+        store.assign_skill(agent.id, skill_id)
+    fourth = store.create_skill(SkillPackageInput(
+        name='Too large', version='1.0.0', description='Too large', instructions='x'))
+    with pytest.raises(ValueError, match='24.000'):
+        store.assign_skill(agent.id, fourth)
+    assert len(store.snapshot().agents[0].skill_ids) == 3
+    store.close()
+
+
+def test_chat_injects_tool_free_skill_and_rejects_tool_skill(tmp_path):
+    async def scenario():
+        store, agent = configured_store(tmp_path)
+        skill_id = store.create_skill(SkillPackageInput(
+            name='Concise', version='1.0.0', description='Short answers',
+            instructions='Use at most three sentences.', provider_hint='ollama'))
+        store.assign_skill(agent.id, skill_id)
+        provider = FakeProvider(tokens=('ok',))
+        service = ChatService(store, lambda _: None, lambda *_: provider)
+        started = await service.handle(request(
+            'chat.start', run_id='skill-chat', agent_id=agent.id, message='Explain'))
+        assert started.ok
+        await service.tasks['skill-chat']
+        assert '<skill name=' in provider.messages[0].content
+        assert 'Use at most three sentences.' in provider.messages[0].content
+
+        tool_skill = store.create_skill(SkillPackageInput(
+            name='Terminal helper', version='1.0.0', description='Uses terminal',
+            instructions='Inspect with terminal.', required_tools=['terminal.execute'],
+            required_permissions=['terminal.execute']))
+        store.set_agent_permissions(agent.id, ['terminal.execute'])
+        store.assign_skill(agent.id, tool_skill)
+        denied = await service.handle(request(
+            'chat.start', run_id='skill-chat-2', agent_id=agent.id, message='Inspect'))
+        assert not denied.ok and 'Ajan masasında' in denied.message
+        assert store.history(agent.id).turns[-1].run_id == 'skill-chat'
+        store.close()
+    asyncio.run(scenario())
+
+
+def test_orchestration_enforces_skill_required_tools_before_start(tmp_path):
+    async def scenario():
+        root = tmp_path / 'project'
+        root.mkdir()
+        store = Store(tmp_path / 'skill-tools.sqlite3')
+        store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+        connection = store.snapshot().connections[0]
+        for name in ('Operator', 'Reviewer'):
+            store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+        agents = store.snapshot().agents
+        store.set_agent_permissions(agents[0].id, ['terminal.execute'])
+        skill_id = store.create_skill(SkillPackageInput(
+            name='Terminal audit', version='1.0.0', description='Runs diagnostics',
+            instructions='Use a read-only diagnostic.', required_tools=['terminal.execute'],
+            required_permissions=['terminal.execute']))
+        store.assign_skill(agents[0].id, skill_id)
+        service = ChatService(store, lambda _: None, lambda *_: FakeProvider(tokens=('done',)))
+        denied = await service.handle(request(
+            'orchestration.start', run_id='skill-denied', objective='Inspect',
+            agent_ids=[agent.id for agent in agents], rounds=1))
+        assert not denied.ok and 'terminal.execute aracını' in denied.message
+        assert store.orchestration_history().runs == []
+        store.close()
+    asyncio.run(scenario())
 
 
 def test_stream_events_are_ordered_and_persisted(tmp_path):

@@ -147,10 +147,30 @@ const valid = {
     connections: [],
     agents: [],
     workspaces: [],
+    skills: [],
   },
 };
 test("generated validator accepts complete responses", () =>
   assert.equal(validate(valid), true));
+test("skill manifests and assignments are typed and closed", () => {
+  const response = {
+    ...valid,
+    result: {
+      ...valid.result,
+      connections: [{ id: "c", name: "Local", provider: "ollama",
+        model_id: "qwen", status: "unconfigured" }],
+      agents: [{ id: "a", name: "Reviewer", role: "review", connection_id: "c",
+        instructions: "", permissions: ["workspace.read"], skill_ids: ["s"] }],
+      skills: [{ id: "s", name: "Code review", version: "1.2.0",
+        description: "Review changes", instructions: "Check correctness.",
+        required_tools: ["knowledge.search"],
+        required_permissions: ["workspace.read"], provider_hint: "ollama" }],
+    },
+  };
+  assert.equal(validate(response), true);
+  assert.equal(validate({ ...response, result: { ...response.result,
+    skills: [{ ...response.result.skills[0], secret: "forbidden" }] } }), false);
+});
 test("generated validator rejects missing discriminant and incorrect payloads", () => {
   const { ok, ...missing } = valid;
   assert.equal(validate(missing), false);

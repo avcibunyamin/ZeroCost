@@ -25,6 +25,7 @@ from .ingestion import KnowledgeIngestor
 from .knowledge_files import read_knowledge_source
 from .models import KnowledgeIngestionProgress, KnowledgeIngestionResult
 from .knowledge_search import HybridKnowledgeSearch
+from .skills import skill_prompt, validate_skill_requirements
 
 MAX_FRAME_BYTES = 64 * 1024
 request_adapter = TypeAdapter(Request)
@@ -53,6 +54,12 @@ def dispatch(store: Store, raw: str):
                 store, request.params.agent_id, request.params.workspace_id, request.params.path))
         elif request.method == "pricing.catalog":
             return Success(request_id=request.request_id, result=catalog())
+        elif request.method == "skill.create":
+            store.create_skill(request.params)
+        elif request.method == "skill.assign":
+            store.assign_skill(request.params.agent_id, request.params.skill_id)
+        elif request.method == "skill.unassign":
+            store.unassign_skill(request.params.agent_id, request.params.skill_id)
         elif request.method != "snapshot":
             raise ValueError("Bu komut asenkron servis gerektirir.")
         return Success(request_id=request.request_id, result=store.snapshot())
@@ -253,10 +260,6 @@ class ChatService:
                 if not isinstance(credentials, dict):
                     raise ValueError('Kimlik bilgisi zarfı geçersiz.')
                 snapshot, agents = self.validate_orchestration_agents(params.agent_ids, credentials)
-                if params.context_paths:
-                    for agent in agents:
-                        if 'workspace.read' not in agent.permissions:
-                            raise ValueError(f'{agent.name} için workspace okuma izni gerekli.')
                 if self.orchestrator is None:
                     from .orchestration import OrchestrationEngine
                     self.orchestrator = OrchestrationEngine(self.store, self.output,
@@ -264,6 +267,12 @@ class ChatService:
                                                             self.embedding_factory)
                 routed_ids, reason, planned = self.orchestrator.route(params, snapshot)
                 params = params.model_copy(update={'agent_ids': routed_ids})
+                agents = [next(agent for agent in snapshot.agents if agent.id == agent_id)
+                          for agent_id in params.agent_ids]
+                if params.context_paths:
+                    for agent in agents:
+                        if 'workspace.read' not in agent.permissions:
+                            raise ValueError(f'{agent.name} için workspace okuma izni gerekli.')
                 if params.enabled_tools:
                     coordinator = next(agent for agent in snapshot.agents
                                        if agent.id == params.agent_ids[0])
@@ -273,6 +282,10 @@ class ChatService:
                 for collection_id in params.knowledge_collection_ids:
                     if self.store.knowledge_collection(collection_id) is None:
                         raise ValueError('Seçilen bilgi koleksiyonu bulunamadı.')
+                for agent in agents:
+                    validate_skill_requirements(
+                        self.store, agent, enabled_tools=params.enabled_tools,
+                        has_knowledge=bool(params.knowledge_collection_ids))
                 context_bytes = sum(inspect_file_size(
                     self.store, agents[0].id, params.workspace_id, path)
                     for path in params.context_paths) if params.context_paths else 0
@@ -320,7 +333,11 @@ class ChatService:
                 credentials = auth.get('credentials', {}) if isinstance(auth, dict) else {}
                 if not isinstance(credentials, dict):
                     raise ValueError('Kimlik bilgisi zarfı geçersiz.')
-                self.validate_orchestration_agents(spec['agent_ids'], credentials)
+                _, agents = self.validate_orchestration_agents(spec['agent_ids'], credentials)
+                for agent in agents:
+                    validate_skill_requirements(
+                        self.store, agent, enabled_tools=spec['enabled_tools'],
+                        has_knowledge=bool(spec['knowledge_collection_ids']))
                 params = SimpleNamespace(**spec)
                 self.store.set_orchestration_status(params.run_id, 'running')
                 task = asyncio.create_task(self.run_orchestration(
@@ -349,6 +366,7 @@ class ChatService:
                 agent = next((a for a in snapshot.agents if a.id == params.agent_id), None)
                 if agent is None:
                     raise ValueError('Ajan bulunamadı.')
+                skills = validate_skill_requirements(self.store, agent, allow_tools=False)
                 connection = next(c for c in snapshot.connections if c.id == agent.connection_id)
                 api_key = None
                 if connection.provider in ('anthropic', 'gemini'):
@@ -365,7 +383,11 @@ class ChatService:
                     if budget < 0:
                         break
                     selected.append(turn)
-                messages = [Message(role='system', content=f'Rol: {agent.role}\n{agent.instructions}')]
+                system_content = f'Rol: {agent.role}\n{agent.instructions}'
+                skill_block = skill_prompt(skills)
+                if skill_block:
+                    system_content += f'\n\n{skill_block}'
+                messages = [Message(role='system', content=system_content)]
                 for turn in reversed(selected):
                     messages.extend([Message(role='user', content=turn.prompt), Message(role='assistant', content=turn.content)])
                 messages.append(Message(role='user', content=params.message))

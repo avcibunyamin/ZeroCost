@@ -56,6 +56,13 @@
           },
           "title": "Permissions",
           "type": "array"
+        },
+        "skill_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skill Ids",
+          "type": "array"
         }
       },
       "required": [
@@ -64,7 +71,8 @@
         "connection_id",
         "instructions",
         "id",
-        "permissions"
+        "permissions",
+        "skill_ids"
       ],
       "title": "Agent",
       "type": "object"
@@ -2370,6 +2378,302 @@
       "title": "RunInput",
       "type": "object"
     },
+    "SkillAssignInput": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "skill_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Skill Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "skill_id"
+      ],
+      "title": "SkillAssignInput",
+      "type": "object"
+    },
+    "SkillAssignRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "skill.assign",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/SkillAssignInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "SkillAssignRequest",
+      "type": "object"
+    },
+    "SkillCreateRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "skill.create",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/SkillPackageInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "SkillCreateRequest",
+      "type": "object"
+    },
+    "SkillPackage": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 20,
+          "minLength": 5,
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "title": "Version",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "instructions": {
+          "default": "",
+          "maxLength": 8000,
+          "title": "Instructions",
+          "type": "string"
+        },
+        "required_tools": {
+          "items": {
+            "enum": [
+              "workspace.write",
+              "terminal.execute",
+              "knowledge.search"
+            ],
+            "type": "string"
+          },
+          "maxItems": 3,
+          "title": "Required Tools",
+          "type": "array"
+        },
+        "required_permissions": {
+          "items": {
+            "enum": [
+              "workspace.read",
+              "workspace.write",
+              "terminal.execute"
+            ],
+            "type": "string"
+          },
+          "maxItems": 3,
+          "title": "Required Permissions",
+          "type": "array"
+        },
+        "provider_hint": {
+          "anyOf": [
+            {
+              "enum": [
+                "ollama",
+                "lmstudio",
+                "anthropic",
+                "gemini",
+                "openai"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Hint"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "description",
+        "instructions",
+        "required_tools",
+        "required_permissions",
+        "provider_hint",
+        "id"
+      ],
+      "title": "SkillPackage",
+      "type": "object"
+    },
+    "SkillPackageInput": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 20,
+          "minLength": 5,
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "title": "Version",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "instructions": {
+          "default": "",
+          "maxLength": 8000,
+          "title": "Instructions",
+          "type": "string"
+        },
+        "required_tools": {
+          "items": {
+            "enum": [
+              "workspace.write",
+              "terminal.execute",
+              "knowledge.search"
+            ],
+            "type": "string"
+          },
+          "maxItems": 3,
+          "title": "Required Tools",
+          "type": "array"
+        },
+        "required_permissions": {
+          "items": {
+            "enum": [
+              "workspace.read",
+              "workspace.write",
+              "terminal.execute"
+            ],
+            "type": "string"
+          },
+          "maxItems": 3,
+          "title": "Required Permissions",
+          "type": "array"
+        },
+        "provider_hint": {
+          "anyOf": [
+            {
+              "enum": [
+                "ollama",
+                "lmstudio",
+                "anthropic",
+                "gemini",
+                "openai"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Hint"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "description",
+        "instructions",
+        "required_tools",
+        "required_permissions",
+        "provider_hint"
+      ],
+      "title": "SkillPackageInput",
+      "type": "object"
+    },
+    "SkillUnassignRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "skill.unassign",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/SkillAssignInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "SkillUnassignRequest",
+      "type": "object"
+    },
     "Snapshot": {
       "additionalProperties": false,
       "properties": {
@@ -2409,6 +2713,13 @@
           },
           "title": "Workspaces",
           "type": "array"
+        },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/SkillPackage"
+          },
+          "title": "Skills",
+          "type": "array"
         }
       },
       "required": [
@@ -2417,7 +2728,8 @@
         "database_version",
         "connections",
         "agents",
-        "workspaces"
+        "workspaces",
+        "skills"
       ],
       "title": "Snapshot",
       "type": "object"
@@ -3155,6 +3467,9 @@
           "orchestration.history": "#/$defs/OrchestrationHistoryRequest",
           "orchestration.start": "#/$defs/OrchestrationStartRequest",
           "pricing.catalog": "#/$defs/PricingCatalogRequest",
+          "skill.assign": "#/$defs/SkillAssignRequest",
+          "skill.create": "#/$defs/SkillCreateRequest",
+          "skill.unassign": "#/$defs/SkillUnassignRequest",
           "snapshot": "#/$defs/SnapshotRequest",
           "vault": "#/$defs/VaultRequest",
           "workspace.create": "#/$defs/WorkspaceRequest",
@@ -3214,6 +3529,15 @@
         },
         {
           "$ref": "#/$defs/PricingCatalogRequest"
+        },
+        {
+          "$ref": "#/$defs/SkillCreateRequest"
+        },
+        {
+          "$ref": "#/$defs/SkillAssignRequest"
+        },
+        {
+          "$ref": "#/$defs/SkillUnassignRequest"
         },
         {
           "$ref": "#/$defs/KnowledgeSnapshotRequest"
