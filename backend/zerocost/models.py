@@ -10,6 +10,7 @@ Provider = Literal["ollama", "lmstudio", "anthropic", "gemini", "openai"]
 Permission = Literal["workspace.read", "workspace.write", "terminal.execute"]
 MutationToolName = Literal["workspace.write", "terminal.execute"]
 ToolName = Literal["workspace.write", "terminal.execute", "knowledge.search"]
+RoutingMode = Literal["manual", "auto"]
 
 
 class Model(BaseModel):
@@ -83,6 +84,62 @@ class SkillAssignInput(Model):
     skill_id: Identifier
 
 
+class WorkflowSlotInput(Model):
+    name: Name
+    required_skill_ids: list[Identifier] = Field(default_factory=list, max_length=8)
+
+    @field_validator("required_skill_ids")
+    @classmethod
+    def unique_skills(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("Duplicate required skill")
+        return value
+
+
+class WorkflowTemplateInput(Model):
+    name: Name
+    version: SemVer
+    description: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+    objective_prefix: Annotated[str, StringConstraints(max_length=4000)] = ""
+    agent_slots: list[WorkflowSlotInput] = Field(min_length=2, max_length=4)
+    required_tools: list[ToolName] = Field(default_factory=list, max_length=3)
+    rounds: int = Field(default=1, ge=1, le=3)
+    max_model_calls: int = Field(default=5, ge=3, le=14)
+    max_output_tokens: int = Field(default=512, ge=128, le=4096)
+    max_cost_microusd: int = Field(default=5_000_000, ge=0, le=1_000_000_000)
+
+    @field_validator("agent_slots")
+    @classmethod
+    def unique_slots(cls, value: list[WorkflowSlotInput]) -> list[WorkflowSlotInput]:
+        names = [slot.name.casefold() for slot in value]
+        if len(names) != len(set(names)):
+            raise ValueError("Duplicate workflow slot")
+        return value
+
+    @field_validator("required_tools")
+    @classmethod
+    def unique_tools(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("Duplicate workflow tool")
+        return value
+
+    @model_validator(mode="after")
+    def budget_covers_team(self):
+        minimum_calls = self.rounds * len(self.agent_slots) + 1 + ("knowledge.search" in self.required_tools)
+        if self.max_model_calls < minimum_calls:
+            raise ValueError("Model call budget does not cover workflow")
+        return self
+
+
+class WorkflowTemplate(WorkflowTemplateInput):
+    id: str
+    archived: bool = False
+
+
+class WorkflowArchiveInput(Model):
+    workflow_id: Identifier
+
+
 class WorkspaceInput(Model):
     name: Name
     path: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4096)]
@@ -107,6 +164,7 @@ class Snapshot(Model):
     agents: list[Agent]
     workspaces: list[Workspace]
     skills: list[SkillPackage] = Field(default_factory=list)
+    workflows: list[WorkflowTemplate] = Field(default_factory=list)
 
 
 class RequestBase(Model):
@@ -319,7 +377,6 @@ class VaultStatus(Model):
 
 OrchestrationStatus = Literal["running", "waiting_approval", "completed", "cancelled", "failed", "interrupted"]
 OrchestrationPhase = Literal["analysis", "review", "synthesis"]
-RoutingMode = Literal["manual", "auto"]
 
 
 class OrchestrationStartInput(Model):
@@ -337,6 +394,8 @@ class OrchestrationStartInput(Model):
     )
     enabled_tools: list[MutationToolName] = Field(default_factory=list, max_length=2)
     knowledge_collection_ids: list[Identifier] = Field(default_factory=list, max_length=3)
+    workflow_id: Identifier | None = None
+    workflow_version: SemVer | None = None
 
     @field_validator("agent_ids")
     @classmethod
@@ -375,6 +434,8 @@ class OrchestrationStartInput(Model):
             raise ValueError("Bağlam dosyaları için çalışma alanı gerekli")
         if self.enabled_tools and not self.workspace_id:
             raise ValueError("Araç kullanımı için çalışma alanı gerekli")
+        if (self.workflow_id is None) != (self.workflow_version is None):
+            raise ValueError("Workflow kimliği ve sürümü birlikte gönderilmeli")
         return self
 
 
@@ -419,6 +480,16 @@ class SkillAssignRequest(RequestBase):
 class SkillUnassignRequest(RequestBase):
     method: Literal["skill.unassign"]
     params: SkillAssignInput
+
+
+class WorkflowCreateRequest(RequestBase):
+    method: Literal["workflow.create"]
+    params: WorkflowTemplateInput
+
+
+class WorkflowArchiveRequest(RequestBase):
+    method: Literal["workflow.archive"]
+    params: WorkflowArchiveInput
 
 
 class PriceEntry(Model):
@@ -595,6 +666,8 @@ class OrchestrationRun(Model):
     context_paths: list[str]
     enabled_tools: list[MutationToolName]
     knowledge_collection_ids: list[str]
+    workflow_id: str | None
+    workflow_version: str | None
     tool_action: ToolAction | None
     status: OrchestrationStatus
     error: str
@@ -705,7 +778,8 @@ Request = Annotated[Union[SnapshotRequest, ConnectionRequest, AgentRequest, Work
                          OrchestrationStartRequest, OrchestrationCancelRequest,
                          OrchestrationApprovalRequest, OrchestrationHistoryRequest,
                          PricingCatalogRequest, SkillCreateRequest, SkillAssignRequest,
-                         SkillUnassignRequest, KnowledgeSnapshotRequest,
+                         SkillUnassignRequest, WorkflowCreateRequest, WorkflowArchiveRequest,
+                         KnowledgeSnapshotRequest,
                          KnowledgeCollectionCreateRequest,
                          KnowledgeSourceIngestRequest, KnowledgeSearchRequest],
                         Field(discriminator="method")]

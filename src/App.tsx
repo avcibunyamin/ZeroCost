@@ -22,6 +22,7 @@ import {
   Sparkles,
   Unplug,
   Users,
+  Workflow as WorkflowIcon,
   X,
 } from "lucide-react";
 import { desktopAvailable, send } from "./api";
@@ -34,6 +35,7 @@ import type {
   AgentPermissionsInput,
   SkillPackageInput,
   SkillAssignInput,
+  WorkflowTemplateInput,
 } from "./generated/contract";
 import "./App.css";
 import { Chat } from "./Chat";
@@ -48,10 +50,11 @@ type Page =
   | "overview"
   | "agents"
   | "skills"
+  | "workflows"
   | "connections"
   | "workspaces"
   | "system";
-type Modal = "connection" | "agent" | "workspace" | "skill" | null;
+type Modal = "connection" | "agent" | "workspace" | "skill" | "workflow" | null;
 const navigation = [
   { id: "overview", label: "Genel bakış", icon: LayoutDashboard },
   { id: "chat", label: "Sohbet", icon: MessageSquare },
@@ -59,6 +62,7 @@ const navigation = [
   { id: "knowledge", label: "Bilgi yönetimi", icon: BookOpen },
   { id: "agents", label: "Ajanlar", icon: Bot },
   { id: "skills", label: "Skill paketleri", icon: Package },
+  { id: "workflows", label: "Workflow tarifleri", icon: WorkflowIcon },
   { id: "connections", label: "Model bağlantıları", icon: GitBranch },
   { id: "workspaces", label: "Çalışma alanları", icon: Folder },
   { id: "system", label: "Sistem", icon: Settings2 },
@@ -70,6 +74,7 @@ const providers: Record<ConnectionInput["provider"], string> = {
   gemini: "Google Gemini",
   openai: "OpenAI",
 };
+type WorkflowTool = "workspace.write" | "terminal.execute" | "knowledge.search";
 
 export default function App() {
   const [page, setPage] = useState<Page>("overview");
@@ -78,6 +83,12 @@ export default function App() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [modal, setModal] = useState<Modal>(null);
+  const [workflowSlotCount, setWorkflowSlotCount] = useState(2);
+  const [workflowRounds, setWorkflowRounds] = useState(1);
+  const [workflowRequiredTools, setWorkflowRequiredTools] = useState<WorkflowTool[]>([]);
+  const [workflowMaxCalls, setWorkflowMaxCalls] = useState(3);
+  const workflowMinimumCalls = workflowSlotCount * workflowRounds + 1
+    + (workflowRequiredTools.includes("knowledge.search") ? 1 : 0);
   const connected = desktopAvailable && !!snapshot;
   async function refresh() {
     setLoading(true);
@@ -101,6 +112,9 @@ export default function App() {
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, [modal, loading]);
+  useEffect(() => {
+    setWorkflowMaxCalls((current) => Math.max(current, workflowMinimumCalls));
+  }, [workflowMinimumCalls]);
   async function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
@@ -138,6 +152,25 @@ export default function App() {
           provider_hint: (hint || null) as SkillPackageInput["provider_hint"],
         };
         result = await send({ method: "skill.create", params });
+      } else if (modal === "workflow") {
+        const tools = workflowRequiredTools as WorkflowTemplateInput["required_tools"];
+        const slots = Array.from({ length: workflowSlotCount }, (_, index) => ({
+          name: field(`slot_${index}_name`),
+          required_skill_ids: Array.from(data.getAll(`slot_${index}_skills`)),
+        })) as WorkflowTemplateInput["agent_slots"];
+        const params: WorkflowTemplateInput = {
+          name: field("name"),
+          version: field("version") || "1.0.0",
+          description: field("description"),
+          objective_prefix: field("objective_prefix"),
+          agent_slots: slots,
+          required_tools: tools,
+          rounds: workflowRounds,
+          max_model_calls: workflowMaxCalls,
+          max_output_tokens: Number(field("max_output_tokens")),
+          max_cost_microusd: Math.round(Number(field("max_cost_usd")) * 1_000_000),
+        };
+        result = await send({ method: "workflow.create", params });
       } else {
         const params: WorkspaceInput = {
           name: field("name"),
@@ -157,6 +190,12 @@ export default function App() {
   const openModal = (value: Modal) => {
     setError("");
     setNotice("");
+    if (value === "workflow") {
+      setWorkflowSlotCount(2);
+      setWorkflowRounds(1);
+      setWorkflowRequiredTools([]);
+      setWorkflowMaxCalls(3);
+    }
     setModal(value);
   };
   async function togglePermission(agentId: string, permission: Permission) {
@@ -202,11 +241,24 @@ export default function App() {
       setLoading(false);
     }
   }
+  async function archiveWorkflow(workflowId: string) {
+    setLoading(true);
+    setError("");
+    try {
+      setSnapshot(await send({ method: "workflow.archive", params: { workflow_id: workflowId } }));
+      setNotice("Workflow sürümü arşivlendi.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
   const counts = {
     agents: snapshot?.agents.length ?? 0,
     connections: snapshot?.connections.length ?? 0,
     workspaces: snapshot?.workspaces.length ?? 0,
     skills: snapshot?.skills?.length ?? 0,
+    workflows: snapshot?.workflows.filter((workflow) => !workflow.archived).length ?? 0,
   };
   const primary = (label: string, target: Modal, disabled = false) => (
     <button
@@ -495,8 +547,54 @@ export default function App() {
                 )}
               </section>
             </>
-          ) : page ===
-            "overview" ? (
+          ) : page === "workflows" ? (
+            <>
+              <div className="page-heading">
+                <div>
+                  <div className="eyebrow">SABİT TOPOLOJİ · SÜRÜMLÜ TARİF</div>
+                  <h1>Workflow tarifleri</h1>
+                  <p>Tekrarlanan ajan görevlerini güvenli ve denetlenebilir tarifler olarak saklayın.</p>
+                </div>
+                {primary("Workflow ekle", "workflow")}
+              </div>
+              <section className="panel">
+                {snapshot?.workflows.length ? (
+                  <div className="agent-grid">
+                    {snapshot.workflows.map((workflow) => (
+                      <article className="agent-card" key={workflow.id}>
+                        <div className="agent-avatar tone-2"><WorkflowIcon size={24} /></div>
+                        <span className={`badge ${workflow.archived ? "neutral" : "positive"}`}>
+                          v{workflow.version} · {workflow.archived ? "Arşiv" : "Etkin"}
+                        </span>
+                        <h3>{workflow.name}</h3>
+                        <p>{workflow.description}</p>
+                        <div className="agent-model"><Users size={14} />
+                          {workflow.agent_slots.map((slot) => slot.name).join(" → ")}
+                        </div>
+                        {workflow.required_tools.length > 0 && (
+                          <div className="agent-model"><Cpu size={14} />
+                            Araçlar: {workflow.required_tools.join(", ")}
+                          </div>
+                        )}
+                        <div className="agent-model"><Activity size={14} />
+                          {workflow.rounds} tur · {workflow.max_model_calls} çağrı · ${
+                            (workflow.max_cost_microusd / 1_000_000).toFixed(2)} üst sınır
+                        </div>
+                        <footer>
+                          {!workflow.archived && (
+                            <button className="permission-button" disabled={loading}
+                              onClick={() => void archiveWorkflow(workflow.id)}>
+                              Arşivle
+                            </button>
+                          )}
+                        </footer>
+                      </article>
+                    ))}
+                  </div>
+                ) : empty("Henüz workflow yok", "İlk sabit topolojili ajan tarifinizi oluşturun.")}
+              </section>
+            </>
+          ) : page === "overview" ? (
             <>
               <div className="page-heading">
                 <div>
@@ -841,7 +939,9 @@ export default function App() {
                     ? "Ajan tanımla"
                     : modal === "skill"
                       ? "Skill paketi oluştur"
-                      : "Çalışma alanı ekle"}
+                      : modal === "workflow"
+                        ? "Workflow tarifi oluştur"
+                        : "Çalışma alanı ekle"}
               </h2>
               <button
                 className="icon-button"
@@ -867,7 +967,9 @@ export default function App() {
                         ? "Örn. Yerel Qwen"
                         : modal === "skill"
                           ? "Örn. Code Review"
-                          : "Örn. Ana projem"
+                          : modal === "workflow"
+                            ? "Örn. Güvenli kod inceleme"
+                            : "Örn. Ana projem"
                   }
                 />
               </label>
@@ -1001,6 +1103,92 @@ export default function App() {
                     Yazma veya terminal aracı seçerseniz aynı adlı izni de seçin.
                     Gereksinimler görev başlarken yeniden kontrol edilir; talimatlar
                     ajan bağlamına otomatik eklenir.
+                  </p>
+                </>
+              )}
+              {modal === "workflow" && (
+                <>
+                  <label>
+                    Sürüm
+                    <input name="version" defaultValue="1.0.0" required maxLength={20}
+                      pattern="\d+\.\d+\.\d+" />
+                  </label>
+                  <label>
+                    Açıklama
+                    <input name="description" required maxLength={500}
+                      placeholder="Bu workflow hangi tekrarlanan görevi yürütür?" />
+                  </label>
+                  <label>
+                    Sabit görev öneki
+                    <textarea name="objective_prefix" maxLength={4000} rows={3}
+                      placeholder="Örn. Değişikliği doğruluk, güvenlik ve test kapsamı açısından incele." />
+                    <small>Placeholder işlenmez. Çalıştırma hedefi bu sabit metnin sonuna eklenir.</small>
+                  </label>
+                  <label>
+                    Ajan yuvası sayısı
+                    <select value={workflowSlotCount}
+                      onChange={(event) => setWorkflowSlotCount(Number(event.target.value))}>
+                      {[2, 3, 4].map((count) => <option key={count} value={count}>{count}</option>)}
+                    </select>
+                  </label>
+                  {Array.from({ length: workflowSlotCount }, (_, index) => (
+                    <fieldset key={index}>
+                      <legend>{index + 1}. ajan yuvası</legend>
+                      <label>
+                        Yuva adı
+                        <input name={`slot_${index}_name`} required maxLength={100}
+                          placeholder={index === 0 ? "Birincil incelemeci" : "Karşı görüş"} />
+                      </label>
+                      {(snapshot?.skills ?? []).map((skill) => (
+                        <label className="agent-choice" key={skill.id}>
+                          <input type="checkbox" name={`slot_${index}_skills`} value={skill.id} />
+                          <span><strong>{skill.name}</strong><small>v{skill.version}</small></span>
+                        </label>
+                      ))}
+                      {snapshot?.skills.length === 0 && <small>Bu yuva için zorunlu skill yok.</small>}
+                    </fieldset>
+                  ))}
+                  <fieldset>
+                    <legend>Workflow araçları</legend>
+                    {(["workspace.write", "terminal.execute", "knowledge.search"] as const).map((tool) => (
+                      <label className="agent-choice" key={tool}>
+                        <input type="checkbox" name="required_tools" value={tool}
+                          checked={workflowRequiredTools.includes(tool)}
+                          onChange={(event) => setWorkflowRequiredTools((current) =>
+                            event.target.checked
+                              ? [...current, tool]
+                              : current.filter((item) => item !== tool))} />
+                        <span>{tool}</span>
+                      </label>
+                    ))}
+                  </fieldset>
+                  <div className="budget-grid">
+                    <label>Tartışma turu
+                      <select name="rounds" value={workflowRounds}
+                        onChange={(event) => setWorkflowRounds(Number(event.target.value))}>
+                        {[1, 2, 3].map((value) => <option key={value} value={value}>{value}</option>)}
+                      </select>
+                    </label>
+                    <label>Model çağrısı bütçesi
+                      <input name="max_model_calls" type="number" min={workflowMinimumCalls}
+                        max={14} value={workflowMaxCalls}
+                        onChange={(event) => setWorkflowMaxCalls(Number(event.target.value))} />
+                      <small>Bu tarif için en az {workflowMinimumCalls} çağrı gerekir.</small>
+                    </label>
+                    <label>Yanıt tokenı / çağrı
+                      <select name="max_output_tokens" defaultValue="512">
+                        {[256, 512, 1024, 2048, 4096].map((value) =>
+                          <option key={value} value={value}>{value}</option>)}
+                      </select>
+                    </label>
+                    <label>Azami maliyet · USD
+                      <input name="max_cost_usd" type="number" min={0} max={1000}
+                        step={0.01} defaultValue={5} />
+                    </label>
+                  </div>
+                  <p className="form-note">
+                    Slot sırası mevcut LangGraph sırasıdır. Workflow izin vermez;
+                    ajan, görev kapsamı ve işlem onayları her çalıştırmada yeniden denetlenir.
                   </p>
                 </>
               )}

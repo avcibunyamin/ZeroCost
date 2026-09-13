@@ -20,7 +20,7 @@ Windows'ta Python komutu `.venv\Scripts\python.exe` olur. Node yardımcı betikl
 
 ## Bu sürümde çalışanlar
 
-- Masaüstü kontrol paneli; bağlantı, ajan, skill paketi ve çalışma alanı formları.
+- Masaüstü kontrol paneli; bağlantı, ajan, skill paketi, workflow tarifi ve çalışma alanı formları.
 - Aynı sağlayıcı için bağımsız model bağlantı profilleri.
 - Ajanın bağlantıyla ilişkilendirilmesi; rol ve talimat kaydı.
 - Mevcut klasörlerin mutlak ve çözümlenmiş yollarla kaydı.
@@ -109,6 +109,14 @@ SQLite şema v11, `skills` ve foreign key/cascade kullanan `skill_assignments` t
 
 Skill, workflow ve executable plugin güven sınırları ile Phase 2/3 geçiş kuralları [ADR-0001](docs/adr/0001-skill-trust-and-capabilities.md) içinde sabitlenmiştir. Temel değişmez kural: skill talimatı ajanın yetkisini genişletemez; üçüncü taraf paketlerde ajan izni, paket sürümüne verilmiş kullanıcı onayının yerine geçmez.
 
+## Workflow tarifleri V1
+
+**Workflow tarifleri** ekranı tekrar eden çoklu ajan görevlerini değişmez, sürümlü tarifler olarak kaydeder. V1 mevcut LangGraph akışını değiştirmez: tarif 2–4 sıralı ajan yuvası, yuva başına sıfır veya daha fazla sabit skill sürümü, gerekli araçlar, 1–3 tur ve çağrı/token/fiat bütçelerini tanımlar. Coordinator alanı ve graph editörü yoktur; yürütme mevcut sıralı görüş, karşı görüş ve ilk ajan sentezi topolojisini kullanır.
+
+Tarifte string interpolation veya placeholder değerlendirmesi yapılmaz. En fazla 4.000 karakterlik `objective_prefix` sabit metin olarak korunur ve kullanıcının her çalıştırmada girdiği serbest hedefin önüne backend tarafından bir kez eklenir. Workflow seçildiğinde UI uyumlu ajanları yuvalara önerir; backend tam slot sayısını, sırasını ve her slotun bütün `required_skill_ids` atamalarını model veya ağ çağrısından önce yeniden doğrular. `knowledge.search` koleksiyon seçimi, yazma/terminal araçları çalışma alanı ve mevcut ajan/görev/onay izin sınırlarını aynen korur; tarif hiçbir yetki vermez.
+
+Aynı adla yeni sürüm oluşturmak önceki sürümleri silmeden arşivler. Arşivli sürüm yeni görev başlatamaz; geçmiş görev ve bekleyen checkpoint provenance kaydını korur. Onay bekleyen mevcut görev tarif sonradan arşivlense de sürdürülebilir, fakat slot skill ataması bu sırada kaldırılırsa onay kapalı davranışla reddedilir. SQLite şema v12, `workflows` tablosu ile `orchestration_runs.workflow_id/workflow_version` alanlarını ekler. `workflow.create` ve `workflow.archive` komutları kapalı Pydantic → TypeScript sözleşmesinden geçer. Kararın kapsamı ve ertelenen graph/plugin işleri [ADR-0002](docs/adr/0002-fixed-workflow-recipes.md) içinde kayıtlıdır.
+
 ## Pydantic → TypeScript sözleşmesi
 
 Tek kaynak `backend/zerocost/models.py` dosyasıdır.
@@ -122,7 +130,7 @@ npm run schema:check
 
 Çoklu ajan görevleri manuel veya deterministik otomatik routing kullanır. Router kararı ve gerekçesi görev kaydında tutulur. Çağrı bütçesi, görev başlamadan önce gerekli model çağrılarını sınırlar; çıktı bütçesi her sağlayıcı isteğine doğrudan uygulanır. Çalışma alanı dosyaları seçildiyse LangGraph görevi `waiting_approval` checkpoint'inde durur. İçerik ancak kullanıcı somut dosya listesini onayladıktan sonra okunur; ret halinde hiçbir model çağrısı yapılmaz.
 
-Protokol v1 yapılandırma komutlarına ek olarak sohbet, kasa, workspace okuma, `pricing.catalog`, `skill.create/assign/unassign`, `knowledge.snapshot`, `knowledge.collection.create` ve `orchestration.start/approve/cancel/history` komutlarını sunar. Her komut `request_id` ve `protocol_version` içerir. Akış parçaları `run_id`, monoton `sequence`, olay türü, ajan/aşama kimliği ve terminal işareti taşır. Yanıtlar ile akış olayları Pydantic'ten üretilen ayrı çalışma zamanı doğrulayıcılarından geçer.
+Protokol v1 yapılandırma komutlarına ek olarak sohbet, kasa, workspace okuma, `pricing.catalog`, `skill.create/assign/unassign`, `workflow.create/archive`, `knowledge.snapshot`, `knowledge.collection.create` ve `orchestration.start/approve/cancel/history` komutlarını sunar. Her komut `request_id` ve `protocol_version` içerir. Akış parçaları `run_id`, monoton `sequence`, olay türü, ajan/aşama kimliği ve terminal işareti taşır. Yanıtlar ile akış olayları Pydantic'ten üretilen ayrı çalışma zamanı doğrulayıcılarından geçer.
 
 ## Veri ve süreç yaşam döngüsü
 
@@ -145,7 +153,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 ```
 
-Backend testleri hesap/ajan ayrımı, foreign key/unique, yeniden açılışta kalıcılık, protokol reddi, klasör sınırları, ajan izinleri, skill sürüm/atama/gereksinim sınırları, ilerideki DB sürümünü koruma, gerçek stdin/stdout iletişimi, model keşfi, NDJSON ayrıştırma, sıralı akış, iptal, çoklu ajan durum geçişleri, fiyat kataloğu, ön kontrol bütçesi, gerçek token bazlı maliyet toplama ve kısmi hata kaydını kapsar. Contract testleri üretilmiş yanıt, skill manifesti ve ajan/aşama olay doğrulayıcılarının bozuk veriyi reddettiğini denetler. Paketlenmiş Python 3.12 sidecar ayrıca iki geçici Ollama ajanıyla gerçek üç aşamalı görev üzerinden doğrulanmıştır.
+Backend testleri hesap/ajan ayrımı, foreign key/unique, yeniden açılışta kalıcılık, protokol reddi, klasör sınırları, ajan izinleri, skill ve workflow sürüm/atama/gereksinim sınırları, workflow provenance ve onayda yeniden doğrulama, ilerideki DB sürümünü koruma, gerçek stdin/stdout iletişimi, model keşfi, NDJSON ayrıştırma, sıralı akış, iptal, çoklu ajan durum geçişleri, fiyat kataloğu, ön kontrol bütçesi, gerçek token bazlı maliyet toplama ve kısmi hata kaydını kapsar. Contract testleri üretilmiş yanıt, skill/workflow manifesti ve ajan/aşama olay doğrulayıcılarının bozuk veriyi reddettiğini denetler. Paketlenmiş Python 3.12 sidecar ayrıca iki geçici Ollama ajanıyla gerçek üç aşamalı görev üzerinden doğrulanmıştır.
 
 ## Masaüstü paketi
 
@@ -157,6 +165,7 @@ macOS uygulaması `src-tauri/target/release/bundle/macos/ZeroCost.app` altında 
 
 ## Sonraki geliştirme dilimi
 
-1. Skill paketlerinden sürümlü görev şablonları ve workflow tarifleri üretme.
+1. Workflow tarifleri için çalıştırma geçmişi filtresi, kopyalama ve açık sürüm karşılaştırması.
 2. Kesilmiş üretim düğümünü kontrollü yeniden deneme ve kısmi görev devamı.
-3. Üçüncü taraf plugin manifesti, imza doğrulaması ve sandbox sınırı.
+3. Ayrı bir dilimde görsel graph editörü ve topoloji doğrulaması.
+4. Üçüncü taraf plugin manifesti, imza doğrulaması ve sandbox sınırı.

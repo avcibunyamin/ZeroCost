@@ -1924,6 +1924,28 @@
           "title": "Knowledge Collection Ids",
           "type": "array"
         },
+        "workflow_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Workflow Id"
+        },
+        "workflow_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Workflow Version"
+        },
         "tool_action": {
           "anyOf": [
             {
@@ -1978,6 +2000,8 @@
         "context_paths",
         "enabled_tools",
         "knowledge_collection_ids",
+        "workflow_id",
+        "workflow_version",
         "tool_action",
         "status",
         "error",
@@ -2094,6 +2118,35 @@
           "maxItems": 3,
           "title": "Knowledge Collection Ids",
           "type": "array"
+        },
+        "workflow_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workflow Id"
+        },
+        "workflow_version": {
+          "anyOf": [
+            {
+              "maxLength": 20,
+              "minLength": 5,
+              "pattern": "^\\d+\\.\\d+\\.\\d+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workflow Version"
         }
       },
       "required": [
@@ -2108,7 +2161,9 @@
         "workspace_id",
         "context_paths",
         "enabled_tools",
-        "knowledge_collection_ids"
+        "knowledge_collection_ids",
+        "workflow_id",
+        "workflow_version"
       ],
       "title": "OrchestrationStartInput",
       "type": "object"
@@ -2720,6 +2775,13 @@
           },
           "title": "Skills",
           "type": "array"
+        },
+        "workflows": {
+          "items": {
+            "$ref": "#/$defs/WorkflowTemplate"
+          },
+          "title": "Workflows",
+          "type": "array"
         }
       },
       "required": [
@@ -2729,7 +2791,8 @@
         "connections",
         "agents",
         "workspaces",
-        "skills"
+        "skills",
+        "workflows"
       ],
       "title": "Snapshot",
       "type": "object"
@@ -3179,6 +3242,312 @@
       "title": "VaultStatus",
       "type": "object"
     },
+    "WorkflowArchiveInput": {
+      "additionalProperties": false,
+      "properties": {
+        "workflow_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Workflow Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id"
+      ],
+      "title": "WorkflowArchiveInput",
+      "type": "object"
+    },
+    "WorkflowArchiveRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "workflow.archive",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/WorkflowArchiveInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "WorkflowArchiveRequest",
+      "type": "object"
+    },
+    "WorkflowCreateRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "workflow.create",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/WorkflowTemplateInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "WorkflowCreateRequest",
+      "type": "object"
+    },
+    "WorkflowSlotInput": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "required_skill_ids": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Required Skill Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "required_skill_ids"
+      ],
+      "title": "WorkflowSlotInput",
+      "type": "object"
+    },
+    "WorkflowTemplate": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 20,
+          "minLength": 5,
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "title": "Version",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "objective_prefix": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Objective Prefix",
+          "type": "string"
+        },
+        "agent_slots": {
+          "items": {
+            "$ref": "#/$defs/WorkflowSlotInput"
+          },
+          "maxItems": 4,
+          "minItems": 2,
+          "title": "Agent Slots",
+          "type": "array"
+        },
+        "required_tools": {
+          "items": {
+            "enum": [
+              "workspace.write",
+              "terminal.execute",
+              "knowledge.search"
+            ],
+            "type": "string"
+          },
+          "maxItems": 3,
+          "title": "Required Tools",
+          "type": "array"
+        },
+        "rounds": {
+          "default": 1,
+          "maximum": 3,
+          "minimum": 1,
+          "title": "Rounds",
+          "type": "integer"
+        },
+        "max_model_calls": {
+          "default": 5,
+          "maximum": 14,
+          "minimum": 3,
+          "title": "Max Model Calls",
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "default": 512,
+          "maximum": 4096,
+          "minimum": 128,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "max_cost_microusd": {
+          "default": 5000000,
+          "maximum": 1000000000,
+          "minimum": 0,
+          "title": "Max Cost Microusd",
+          "type": "integer"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "archived": {
+          "default": false,
+          "title": "Archived",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "description",
+        "objective_prefix",
+        "agent_slots",
+        "required_tools",
+        "rounds",
+        "max_model_calls",
+        "max_output_tokens",
+        "max_cost_microusd",
+        "id",
+        "archived"
+      ],
+      "title": "WorkflowTemplate",
+      "type": "object"
+    },
+    "WorkflowTemplateInput": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 20,
+          "minLength": 5,
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "title": "Version",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "objective_prefix": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Objective Prefix",
+          "type": "string"
+        },
+        "agent_slots": {
+          "items": {
+            "$ref": "#/$defs/WorkflowSlotInput"
+          },
+          "maxItems": 4,
+          "minItems": 2,
+          "title": "Agent Slots",
+          "type": "array"
+        },
+        "required_tools": {
+          "items": {
+            "enum": [
+              "workspace.write",
+              "terminal.execute",
+              "knowledge.search"
+            ],
+            "type": "string"
+          },
+          "maxItems": 3,
+          "title": "Required Tools",
+          "type": "array"
+        },
+        "rounds": {
+          "default": 1,
+          "maximum": 3,
+          "minimum": 1,
+          "title": "Rounds",
+          "type": "integer"
+        },
+        "max_model_calls": {
+          "default": 5,
+          "maximum": 14,
+          "minimum": 3,
+          "title": "Max Model Calls",
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "default": 512,
+          "maximum": 4096,
+          "minimum": 128,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "max_cost_microusd": {
+          "default": 5000000,
+          "maximum": 1000000000,
+          "minimum": 0,
+          "title": "Max Cost Microusd",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "description",
+        "objective_prefix",
+        "agent_slots",
+        "required_tools",
+        "rounds",
+        "max_model_calls",
+        "max_output_tokens",
+        "max_cost_microusd"
+      ],
+      "title": "WorkflowTemplateInput",
+      "type": "object"
+    },
     "Workspace": {
       "additionalProperties": false,
       "properties": {
@@ -3472,6 +3841,8 @@
           "skill.unassign": "#/$defs/SkillUnassignRequest",
           "snapshot": "#/$defs/SnapshotRequest",
           "vault": "#/$defs/VaultRequest",
+          "workflow.archive": "#/$defs/WorkflowArchiveRequest",
+          "workflow.create": "#/$defs/WorkflowCreateRequest",
           "workspace.create": "#/$defs/WorkspaceRequest",
           "workspace.list": "#/$defs/WorkspaceListRequest",
           "workspace.read": "#/$defs/WorkspaceReadRequest"
@@ -3538,6 +3909,12 @@
         },
         {
           "$ref": "#/$defs/SkillUnassignRequest"
+        },
+        {
+          "$ref": "#/$defs/WorkflowCreateRequest"
+        },
+        {
+          "$ref": "#/$defs/WorkflowArchiveRequest"
         },
         {
           "$ref": "#/$defs/KnowledgeSnapshotRequest"

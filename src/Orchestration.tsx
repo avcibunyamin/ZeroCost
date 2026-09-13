@@ -10,6 +10,7 @@ import type {
   KnowledgeCollection,
   PricingCatalog,
   Snapshot,
+  WorkflowTemplate,
 } from "./generated/contract";
 
 type StreamingMessage = {
@@ -31,6 +32,7 @@ type Approval = {
 
 export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
   const [selected, setSelected] = useState<string[]>([]);
+  const [workflowId, setWorkflowId] = useState("");
   const [objective, setObjective] = useState("");
   const [rounds, setRounds] = useState(1);
   const [routingMode, setRoutingMode] = useState<"manual" | "auto">("auto");
@@ -51,6 +53,9 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
   const [error, setError] = useState("");
   const runId = useRef<string | null>(null);
   const eventSequence = useRef(0);
+  const workflow: WorkflowTemplate | undefined = snapshot?.workflows.find(
+    (item) => item.id === workflowId && !item.archived,
+  );
 
   async function refresh() {
     const result = await rpc({ method: "orchestration.history" });
@@ -90,9 +95,23 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
     }
   }, []);
   useEffect(() => {
-    if (selected.length < 2 && (snapshot?.agents.length ?? 0) >= 2)
+    if (!workflowId && selected.length < 2 && (snapshot?.agents.length ?? 0) >= 2)
       setSelected(snapshot!.agents.slice(0, 2).map((agent) => agent.id));
-  }, [snapshot]);
+  }, [snapshot, workflowId]);
+  useEffect(() => {
+    if (!workflow || !snapshot) return;
+    const used = new Set<string>();
+    const bindings = workflow.agent_slots.map((slot) => {
+      const agent = snapshot.agents.find((candidate) =>
+        !used.has(candidate.id) &&
+        slot.required_skill_ids.every((skillId) => candidate.skill_ids.includes(skillId)));
+      if (agent) used.add(agent.id);
+      return agent?.id ?? "";
+    });
+    setSelected(bindings);
+    setEnabledTools(workflow.required_tools.filter((tool) =>
+      tool !== "knowledge.search") as ("workspace.write" | "terminal.execute")[]);
+  }, [workflow, snapshot]);
   useEffect(() => {
     if (!desktopAvailable) return;
     let disposed = false;
@@ -230,9 +249,16 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
           : current,
     );
   }
+  function bindSlot(index: number, agentId: string) {
+    setSelected((current) => {
+      const next = [...current];
+      next[index] = agentId;
+      return next;
+    });
+  }
   async function start(event: FormEvent) {
     event.preventDefault();
-    if (selected.length < 2 || !objective.trim() || active) return;
+    if (selected.length < 2 || selected.some((id) => !id) || !objective.trim() || active) return;
     const id = crypto.randomUUID();
     const contextPaths = [
       ...new Set(
@@ -242,16 +268,27 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
           .filter(Boolean),
       ),
     ].slice(0, 10);
+    const effectiveRounds = workflow?.rounds ?? rounds;
+    const effectiveRouting = workflow ? "manual" : routingMode;
+    const effectiveMaxCalls = workflow?.max_model_calls ?? maxModelCalls;
+    const effectiveMaxTokens = workflow?.max_output_tokens ?? maxOutputTokens;
+    const effectiveMaxCost = workflow?.max_cost_microusd ?? Math.round(maxCostUsd * 1_000_000);
+    const effectiveTools = workflow
+      ? workflow.required_tools.filter((tool) => tool !== "knowledge.search")
+      : enabledTools;
+    const fullObjective = workflow?.objective_prefix.trim()
+      ? `${workflow.objective_prefix.trim()}\n\n${objective.trim()}`
+      : objective.trim();
     const run: OrchestrationRun = {
       run_id: id,
-      objective: objective.trim(),
+      objective: fullObjective,
       agent_ids: selected as OrchestrationStartInput["agent_ids"],
-      rounds,
-      routing_mode: routingMode,
+      rounds: effectiveRounds,
+      routing_mode: effectiveRouting,
       route_reason: "Yönlendirme bekleniyor.",
-      max_model_calls: maxModelCalls,
-      max_output_tokens: maxOutputTokens,
-      max_cost_microusd: Math.round(maxCostUsd * 1_000_000),
+      max_model_calls: effectiveMaxCalls,
+      max_output_tokens: effectiveMaxTokens,
+      max_cost_microusd: effectiveMaxCost,
       estimated_max_cost_microusd: 0,
       actual_cost_microusd: 0,
       input_tokens: 0,
@@ -260,8 +297,10 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       used_model_calls: 0,
       workspace_id: workspaceId || null,
       context_paths: contextPaths,
-      enabled_tools: enabledTools,
+      enabled_tools: effectiveTools as OrchestrationRun["enabled_tools"],
       knowledge_collection_ids: selectedKnowledge,
+      workflow_id: workflow?.id ?? null,
+      workflow_version: workflow?.version ?? null,
       tool_action: null,
       status: "running",
       error: "",
@@ -277,19 +316,21 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
         method: "orchestration.start",
         params: {
           run_id: id,
-          objective: run.objective,
+          objective: objective.trim(),
           agent_ids: selected as OrchestrationStartInput["agent_ids"],
-          rounds,
-          routing_mode: routingMode,
-          max_model_calls: maxModelCalls,
-          max_output_tokens: maxOutputTokens,
-          max_cost_microusd: Math.round(maxCostUsd * 1_000_000),
+          rounds: effectiveRounds,
+          routing_mode: effectiveRouting,
+          max_model_calls: effectiveMaxCalls,
+          max_output_tokens: effectiveMaxTokens,
+          max_cost_microusd: effectiveMaxCost,
           workspace_id: workspaceId || null,
           context_paths:
             contextPaths as OrchestrationStartInput["context_paths"],
-          enabled_tools: enabledTools as OrchestrationStartInput["enabled_tools"],
+          enabled_tools: effectiveTools as OrchestrationStartInput["enabled_tools"],
           knowledge_collection_ids:
             selectedKnowledge as OrchestrationStartInput["knowledge_collection_ids"],
+          workflow_id: workflow?.id ?? null,
+          workflow_version: workflow?.version ?? null,
         },
       });
     } catch (e) {
@@ -335,6 +376,9 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
   }
 
   const current = runs[0];
+  const currentWorkflow = current?.workflow_id
+    ? snapshot?.workflows.find((item) => item.id === current.workflow_id)
+    : undefined;
   const messages: (OrchestrationMessage | StreamingMessage)[] = [
     ...(current?.messages ?? []),
     ...(streaming ? [streaming] : []),
@@ -347,6 +391,17 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
     synthesis: "Ortak sonuç",
   } as const;
   const contextRequested = !!contextInput.trim();
+  const workflowNeedsKnowledge = workflow?.required_tools.some(
+    (tool) => tool === "knowledge.search") ?? false;
+  const effectiveTools: ("workspace.write" | "terminal.execute")[] = workflow
+    ? workflow.required_tools.filter((tool) => tool !== "knowledge.search") as
+      ("workspace.write" | "terminal.execute")[]
+    : enabledTools;
+  const effectiveRounds = workflow?.rounds ?? rounds;
+  const effectiveMaxCalls = workflow?.max_model_calls ?? maxModelCalls;
+  const effectiveMaxCostUsd = workflow
+    ? workflow.max_cost_microusd / 1_000_000
+    : maxCostUsd;
   const missingReadPermission =
     contextRequested &&
     selected.some(
@@ -355,9 +410,11 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
           .find((agent) => agent.id === id)
           ?.permissions.includes("workspace.read"),
     );
-  const missingToolPermission = enabledTools.some((tool) =>
+  const missingToolPermission = effectiveTools.some((tool) =>
     selected.some((id) => !snapshot?.agents.find((agent) => agent.id === id)?.permissions.includes(tool)),
   );
+  const missingWorkflowWorkspace = !!workflow && effectiveTools.length > 0 && !workspaceId;
+  const missingWorkflowKnowledge = workflowNeedsKnowledge && selectedKnowledge.length === 0;
   return (
     <>
       <div className="page-heading">
@@ -382,6 +439,19 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
             </div>
             <Users size={20} />
           </div>
+          {(snapshot?.workflows.some((item) => !item.archived) ?? false) && (
+            <label>
+              Workflow tarifi
+              <select value={workflowId} onChange={(event) => setWorkflowId(event.target.value)}
+                disabled={active}>
+                <option value="">Serbest ajan görevi</option>
+                {snapshot!.workflows.filter((item) => !item.archived).map((item) => (
+                  <option key={item.id} value={item.id}>{item.name} · v{item.version}</option>
+                ))}
+              </select>
+              <small>Tarif sabit ajan sırasını, skill gereksinimlerini ve bütçeyi uygular.</small>
+            </label>
+          )}
           <label>
             Görev
             <textarea
@@ -392,10 +462,30 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               placeholder="Ekibin çözmesini istediğiniz hedefi yazın…"
               disabled={active}
             />
+            {workflow?.objective_prefix && <small>
+              Sabit önek: {workflow.objective_prefix}
+            </small>}
           </label>
           <fieldset disabled={active}>
             <legend>Ajanlar</legend>
-            {snapshot?.agents.map((agent) => (
+            {workflow ? workflow.agent_slots.map((slot, index) => (
+              <label key={`${workflow.id}-${slot.name}`}>
+                {index + 1}. {slot.name}
+                <select value={selected[index] ?? ""}
+                  onChange={(event) => bindSlot(index, event.target.value)} required>
+                  <option value="">Uygun ajan seçin</option>
+                  {snapshot?.agents.filter((agent) =>
+                    slot.required_skill_ids.every((skillId) => agent.skill_ids.includes(skillId)) &&
+                    !selected.some((selectedId, selectedIndex) =>
+                      selectedIndex !== index && selectedId === agent.id)).map((agent) => (
+                    <option key={agent.id} value={agent.id}>{agent.name} · {agent.role}</option>
+                  ))}
+                </select>
+                <small>{slot.required_skill_ids.length
+                  ? `${slot.required_skill_ids.length} sabit skill sürümü gerekli`
+                  : "Zorunlu skill yok"}</small>
+              </label>
+            )) : snapshot?.agents.map((agent) => (
               <label className="agent-choice" key={agent.id}>
                 <input
                   type="checkbox"
@@ -428,11 +518,11 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
           <label>
             Yönlendirme
             <select
-              value={routingMode}
+              value={workflow ? "manual" : routingMode}
               onChange={(e) =>
                 setRoutingMode(e.target.value as "manual" | "auto")
               }
-              disabled={active}
+              disabled={active || !!workflow}
             >
               <option value="auto">Otomatik · göreve göre sırala</option>
               <option value="manual">Manuel · seçim sırasını koru</option>
@@ -445,9 +535,9 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
                 type="number"
                 min={3}
                 max={14}
-                value={maxModelCalls}
+                value={workflow?.max_model_calls ?? maxModelCalls}
                 onChange={(e) => setMaxModelCalls(Number(e.target.value))}
-                disabled={active}
+                disabled={active || !!workflow}
               />
             </label>
             <label>
@@ -457,17 +547,17 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
                 min={0}
                 max={1000}
                 step={0.01}
-                value={maxCostUsd}
+                value={workflow ? workflow.max_cost_microusd / 1_000_000 : maxCostUsd}
                 onChange={(e) => setMaxCostUsd(Number(e.target.value))}
-                disabled={active}
+                disabled={active || !!workflow}
               />
             </label>
             <label>
               Yanıt tokenı / çağrı
               <select
-                value={maxOutputTokens}
+                value={workflow?.max_output_tokens ?? maxOutputTokens}
                 onChange={(e) => setMaxOutputTokens(Number(e.target.value))}
-                disabled={active}
+                disabled={active || !!workflow}
               >
                 {[256, 512, 1024, 2048, 4096].map((value) => (
                   <option value={value} key={value}>{value}</option>
@@ -492,9 +582,9 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
           <label>
             Tartışma turu
             <select
-              value={rounds}
+              value={workflow?.rounds ?? rounds}
               onChange={(e) => setRounds(Number(e.target.value))}
-              disabled={active}
+              disabled={active || !!workflow}
             >
               <option value={1}>1 tur</option>
               <option value={2}>2 tur</option>
@@ -532,17 +622,18 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               </small>
             </label>
           )}
-          {workspaceId && (
-            <fieldset disabled={active}>
+          {(workspaceId || workflow) && (
+            <fieldset disabled={active || !!workflow}>
               <legend>Model araç önerileri</legend>
               {(["workspace.write", "terminal.execute"] as const).map((tool) => (
                 <label className="agent-choice" key={tool}>
-                  <input type="checkbox" checked={enabledTools.includes(tool)}
+                  <input type="checkbox" checked={effectiveTools.includes(tool)}
                     onChange={() => setEnabledTools((current) => current.includes(tool)
                       ? current.filter((item) => item !== tool) : [...current, tool])} />
                   <span><strong>{tool}</strong><small>Her çalıştırmada somut önizleme ve onay gerekir.</small></span>
                 </label>
               ))}
+              {workflowNeedsKnowledge && <small>knowledge.search için en az bir koleksiyon seçilmelidir.</small>}
             </fieldset>
           )}
           {missingReadPermission && (
@@ -552,6 +643,12 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
           )}
           {missingToolPermission && <div className="form-error">
             Seçili ajanların araç izinlerini Ajanlar ekranından açın.
+          </div>}
+          {missingWorkflowWorkspace && <div className="form-error">
+            Workflow araçları için bir çalışma alanı seçin.
+          </div>}
+          {missingWorkflowKnowledge && <div className="form-error">
+            Workflow için en az bir yerel bilgi koleksiyonu seçin.
           </div>}
           {approval && (
             <div className="approval-card" role="alert">
@@ -595,15 +692,18 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               className="button primary"
               disabled={
                 selected.length < 2 ||
+                selected.some((id) => !id) ||
                 !objective.trim() ||
-                (routingMode === "manual" &&
-                  maxModelCalls < selected.length * rounds + 1 + (selectedKnowledge.length ? 1 : 0)) ||
-                maxModelCalls < rounds * 2 + 1 + (selectedKnowledge.length ? 1 : 0) ||
-                !Number.isFinite(maxCostUsd) ||
-                maxCostUsd < 0 ||
-                maxCostUsd > 1000 ||
+                ((workflow || routingMode === "manual") &&
+                  effectiveMaxCalls < selected.length * effectiveRounds + 1 + (selectedKnowledge.length ? 1 : 0)) ||
+                effectiveMaxCalls < effectiveRounds * 2 + 1 + (selectedKnowledge.length ? 1 : 0) ||
+                !Number.isFinite(effectiveMaxCostUsd) ||
+                effectiveMaxCostUsd < 0 ||
+                effectiveMaxCostUsd > 1000 ||
                 missingReadPermission ||
                 missingToolPermission ||
+                missingWorkflowWorkspace ||
+                missingWorkflowKnowledge ||
                 (contextRequested && !workspaceId)
               }
             >
@@ -621,6 +721,11 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
                   ? `${current.agent_ids.length} ajan · ${current.rounds} tur`
                   : "Henüz ortak görev yok."}
               </p>
+              {current?.workflow_id && (
+                <small>
+                  Workflow: {currentWorkflow?.name ?? current.workflow_id} v{current.workflow_version}
+                </small>
+              )}
               {current?.route_reason && (
                 <small>
                   {current.route_reason} · {current.used_model_calls}/{current.max_model_calls} çağrı

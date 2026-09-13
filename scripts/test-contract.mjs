@@ -32,6 +32,7 @@ test("orchestration and workspace responses are closed", () => {
         actual_cost_microusd: 0, input_tokens: 0, output_tokens: 0,
         price_catalog_version: "2026-09-09",
         workspace_id: null, context_paths: [], enabled_tools: [], knowledge_collection_ids: [],
+        workflow_id: null, workflow_version: null,
         tool_action: null,
         status: "completed", error: "", messages: [
           { sequence: 1, agent_id: "a", phase: "analysis", content: "view" },
@@ -148,6 +149,7 @@ const valid = {
     agents: [],
     workspaces: [],
     skills: [],
+    workflows: [],
   },
 };
 test("generated validator accepts complete responses", () =>
@@ -170,6 +172,24 @@ test("skill manifests and assignments are typed and closed", () => {
   assert.equal(validate(response), true);
   assert.equal(validate({ ...response, result: { ...response.result,
     skills: [{ ...response.result.skills[0], secret: "forbidden" }] } }), false);
+});
+test("workflow recipes preserve fixed slots and closed metadata", () => {
+  const response = {
+    ...valid,
+    result: { ...valid.result, workflows: [{
+      id: "w", name: "Review", version: "1.0.0", description: "Review flow",
+      objective_prefix: "Review carefully.",
+      agent_slots: [
+        { name: "Primary", required_skill_ids: ["s"] },
+        { name: "Counterpoint", required_skill_ids: [] },
+      ],
+      required_tools: ["knowledge.search"], rounds: 1, max_model_calls: 4,
+      max_output_tokens: 512, max_cost_microusd: 5000000, archived: false,
+    }] },
+  };
+  assert.equal(validate(response), true);
+  assert.equal(validate({ ...response, result: { ...response.result,
+    workflows: [{ ...response.result.workflows[0], graph_code: "forbidden" }] } }), false);
 });
 test("generated validator rejects missing discriminant and incorrect payloads", () => {
   const { ok, ...missing } = valid;

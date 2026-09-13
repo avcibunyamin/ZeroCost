@@ -8,7 +8,8 @@ import pytest
 import asyncio
 from zerocost.models import (AgentInput, ConnectionInput, WorkspaceInput,
                              KnowledgeCollectionInput, KnowledgeIngestionProgress,
-                             SkillPackageInput)
+                             SkillPackageInput, WorkflowSlotInput,
+                             WorkflowTemplateInput)
 from zerocost.sidecar import ChatService, dispatch
 from zerocost.storage import Store
 from zerocost.providers.base import Message, ProviderError
@@ -175,13 +176,14 @@ def test_v4_orchestration_migrates_with_budget_defaults(tmp_path):
     store.db.execute('DROP TABLE knowledge_collections')
     store.db.execute('DROP TABLE skill_assignments')
     store.db.execute('DROP TABLE skills')
+    store.db.execute('DROP TABLE workflows')
     store.db.execute('PRAGMA user_version=4')
     store.db.commit()
     store.close()
 
     migrated = Store(path)
     run = migrated.orchestration_history().runs[0]
-    assert migrated.snapshot().database_version == 11
+    assert migrated.snapshot().database_version == 12
     assert run.routing_mode == 'manual' and run.max_model_calls == 5
     assert run.agent_ids == [a.id for a in agents]
     assert migrated.db.execute('PRAGMA foreign_key_check').fetchall() == []
@@ -327,13 +329,17 @@ def test_v8_knowledge_data_migrates_to_versioned_hash_cache(tmp_path):
     store.db.execute('ALTER TABLE knowledge_sources DROP COLUMN index_version')
     store.db.execute('DROP TABLE skill_assignments')
     store.db.execute('DROP TABLE skills')
+    store.db.execute('DROP TABLE workflows')
+    store.db.execute('DROP INDEX orchestration_workflow')
+    store.db.execute('ALTER TABLE orchestration_runs DROP COLUMN workflow_id')
+    store.db.execute('ALTER TABLE orchestration_runs DROP COLUMN workflow_version')
     store.db.execute('PRAGMA user_version=8')
     store.db.commit()
     store.close()
 
     migrated = Store(path)
     source = migrated.knowledge_source_hash(collection_id, workspace.id, 'legacy.md')
-    assert migrated.snapshot().database_version == 11
+    assert migrated.snapshot().database_version == 12
     assert source == {'content_hash': 'old-hash', 'status': 'ready', 'index_version': 'legacy-v8'}
     assert migrated.search_knowledge_fts(collection_id, 'korunan')[0]['content'] == 'korunan içerik'
     assert migrated.db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
@@ -545,6 +551,155 @@ def test_orchestration_enforces_skill_required_tools_before_start(tmp_path):
             agent_ids=[agent.id for agent in agents], rounds=1))
         assert not denied.ok and 'terminal.execute aracını' in denied.message
         assert store.orchestration_history().runs == []
+        store.close()
+    asyncio.run(scenario())
+
+
+def test_workflow_versions_archive_without_breaking_old_records(tmp_path):
+    store, agent = configured_store(tmp_path)
+    skill_id = store.create_skill(SkillPackageInput(
+        name='Review', version='1.0.0', description='Review', instructions='Review carefully.'))
+    first = store.create_workflow(WorkflowTemplateInput(
+        name='Code review', version='1.0.0', description='First version',
+        objective_prefix='Review this change.',
+        agent_slots=[WorkflowSlotInput(name='Reviewer', required_skill_ids=[skill_id]),
+                     WorkflowSlotInput(name='Challenger')],
+        rounds=1, max_model_calls=3))
+    second = store.create_workflow(WorkflowTemplateInput(
+        name='Code review', version='2.0.0', description='Second version',
+        objective_prefix='Review correctness and security.',
+        agent_slots=[WorkflowSlotInput(name='Reviewer', required_skill_ids=[skill_id]),
+                     WorkflowSlotInput(name='Challenger')],
+        rounds=1, max_model_calls=3))
+    workflows = store.snapshot().workflows
+    assert [(item.id, item.archived) for item in workflows] == [(second, False), (first, True)]
+    duplicate = dispatch(store, request(
+        'workflow.create', name='Code review', version='2.0.0', description='Duplicate',
+        objective_prefix='', agent_slots=[
+            {'name': 'One', 'required_skill_ids': []},
+            {'name': 'Two', 'required_skill_ids': []}],
+        required_tools=[], rounds=1, max_model_calls=3,
+        max_output_tokens=512, max_cost_microusd=5_000_000))
+    assert not duplicate.ok and duplicate.code == 'conflict'
+    assert store.workflow(second).archived is False
+    assert dispatch(store, request('workflow.archive', workflow_id=second)).ok
+    assert all(item.archived for item in store.snapshot().workflows)
+    store.close()
+
+
+def test_workflow_compiles_fixed_topology_and_persists_provenance(tmp_path):
+    async def scenario():
+        store = Store(tmp_path / 'workflow.sqlite3')
+        store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+        connection = store.snapshot().connections[0]
+        for name in ('Reviewer', 'Challenger'):
+            store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+        agents = store.snapshot().agents
+        skill_id = store.create_skill(SkillPackageInput(
+            name='Review', version='1.0.0', description='Review', instructions='Check evidence.'))
+        workflow_id = store.create_workflow(WorkflowTemplateInput(
+            name='Review flow', version='1.0.0', description='Fixed review flow',
+            objective_prefix='Apply the review policy.',
+            agent_slots=[WorkflowSlotInput(name='Primary', required_skill_ids=[skill_id]),
+                         WorkflowSlotInput(name='Counterpoint')],
+            rounds=1, max_model_calls=3, max_output_tokens=256,
+            max_cost_microusd=1_000_000))
+        providers = []
+        def factory(*_):
+            provider = FakeProvider(tokens=('done',))
+            providers.append(provider)
+            return provider
+        service = ChatService(store, lambda _: None, factory)
+        raw = request('orchestration.start', run_id='workflow-missing', objective='Inspect change',
+                      agent_ids=[agent.id for agent in agents], rounds=1,
+                      max_model_calls=3, workflow_id=workflow_id, workflow_version='1.0.0')
+        denied = await service.handle(raw)
+        assert not denied.ok and 'Review v1.0.0' in denied.message
+        assert providers == [] and store.orchestration_history().runs == []
+
+        store.assign_skill(agents[0].id, skill_id)
+        started = await service.handle(request(
+            'orchestration.start', run_id='workflow-run', objective='Inspect change',
+            agent_ids=[agent.id for agent in agents], rounds=1,
+            max_model_calls=3, max_output_tokens=512, max_cost_microusd=5_000_000,
+            workflow_id=workflow_id, workflow_version='1.0.0'))
+        assert started.ok
+        await service.tasks['workflow-run']
+        run = store.orchestration_history().runs[0]
+        assert run.status == 'completed'
+        assert run.objective == 'Apply the review policy.\n\nInspect change'
+        assert (run.workflow_id, run.workflow_version) == (workflow_id, '1.0.0')
+        assert (run.routing_mode, run.rounds, run.max_model_calls, run.max_output_tokens) == (
+            'manual', 1, 3, 256)
+        assert 'Check evidence.' in providers[0].messages[0].content
+        assert store.db.execute('PRAGMA foreign_key_check').fetchall() == []
+        store.close()
+    asyncio.run(scenario())
+
+
+def test_workflow_knowledge_requirement_fails_without_collection(tmp_path):
+    async def scenario():
+        store = Store(tmp_path / 'workflow-knowledge.sqlite3')
+        store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+        connection = store.snapshot().connections[0]
+        for name in ('A', 'B'):
+            store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+        workflow_id = store.create_workflow(WorkflowTemplateInput(
+            name='Research', version='1.0.0', description='Searches knowledge',
+            agent_slots=[WorkflowSlotInput(name='A'), WorkflowSlotInput(name='B')],
+            required_tools=['knowledge.search'], rounds=1, max_model_calls=4))
+        service = ChatService(store, lambda _: None, lambda *_: FakeProvider())
+        denied = await service.handle(request(
+            'orchestration.start', run_id='workflow-no-knowledge', objective='Research',
+            agent_ids=[agent.id for agent in store.snapshot().agents], rounds=1,
+            max_model_calls=4, workflow_id=workflow_id, workflow_version='1.0.0'))
+        assert not denied.ok and 'bilgi koleksiyonu' in denied.message
+        assert store.orchestration_history().runs == []
+        store.close()
+    asyncio.run(scenario())
+
+
+def test_workflow_approval_revalidates_slot_skills(tmp_path):
+    async def scenario():
+        root = tmp_path / 'project'
+        root.mkdir()
+        (root / 'brief.md').write_text('review target', encoding='utf-8')
+        store = Store(tmp_path / 'workflow-approval.sqlite3')
+        store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+        connection = store.snapshot().connections[0]
+        for name in ('Reviewer', 'Challenger'):
+            store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+        agents = store.snapshot().agents
+        skill_id = store.create_skill(SkillPackageInput(
+            name='Review', version='1.0.0', description='Review', instructions='Check evidence.'))
+        store.assign_skill(agents[0].id, skill_id)
+        for agent in agents:
+            store.set_agent_permissions(agent.id, ['workspace.read'])
+        store.create_workspace(WorkspaceInput(name='Project', path=str(root)))
+        workspace = store.snapshot().workspaces[0]
+        workflow_id = store.create_workflow(WorkflowTemplateInput(
+            name='Approval flow', version='1.0.0', description='Approval revalidation',
+            objective_prefix='Review.',
+            agent_slots=[WorkflowSlotInput(name='Primary', required_skill_ids=[skill_id]),
+                         WorkflowSlotInput(name='Counterpoint')],
+            rounds=1, max_model_calls=3))
+        provider = FakeProvider()
+        service = ChatService(store, lambda _: None, lambda *_: provider)
+        started = await service.handle(request(
+            'orchestration.start', run_id='workflow-approval', objective='Inspect',
+            agent_ids=[agent.id for agent in agents], rounds=1, max_model_calls=3,
+            workspace_id=workspace.id, context_paths=['brief.md'],
+            workflow_id=workflow_id, workflow_version='1.0.0'))
+        assert started.ok
+        await service.tasks['workflow-approval']
+        assert store.orchestration_history().runs[0].status == 'waiting_approval'
+
+        store.unassign_skill(agents[0].id, skill_id)
+        denied = await service.handle(request(
+            'orchestration.approve', run_id='workflow-approval', decision='approve'))
+        assert not denied.ok and 'Review v1.0.0' in denied.message
+        assert store.orchestration_history().runs[0].status == 'waiting_approval'
+        assert provider.messages == []
         store.close()
     asyncio.run(scenario())
 

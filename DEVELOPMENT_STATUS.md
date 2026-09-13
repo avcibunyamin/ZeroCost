@@ -225,3 +225,16 @@ Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırıl
 - Skill oluşturma paneli, sağlayıcı önerisi ve ajan kartından atama/sürüm değiştirme arayüzü
 - Skill/workflow/plugin ayrımı, canonical package kimliği ve paket bazlı kullanıcı onayı ADR-0001 ile karara bağlandı
 - 99 Python, 13 JavaScript sözleşme ve 2 etkin Rust testi geçti
+
+## Workflow tarifleri V1 · sabit topoloji
+
+- SQLite v11 → v12 migration; değişmez `(name, version)` kayıtları ve yeni sürümde eskileri arşivleme
+- Mevcut LangGraph sırasını kullanan 2–4 ajan yuvası; coordinator alanı veya graph editörü yok
+- Slot başına çoklu sabit skill kimliği ve model çağrısından önce tam, sıralı binding doğrulaması
+- Interpolation içermeyen sabit `objective_prefix` ile ayrı serbest çalışma hedefi
+- Tarife ait tur, araç, çağrı, token ve fiat bütçelerini backend'de yetkili biçimde derleme
+- `orchestration_runs` üzerinde nullable workflow kimliği/sürümü provenance kaydı
+- Arşivli sürümle yeni çalıştırmayı reddetme; bekleyen çalışmada slot skill değişimini onay öncesi yeniden doğrulama
+- Workflow oluşturma/arşivleme paneli, dinamik asgari çağrı bütçesi ve Ajan masasında slot bağlama arayüzü
+- Pydantic → TypeScript kapalı IPC sözleşmesi ve ADR-0002 mimari kararı
+- 103 Python, 14 JavaScript sözleşme ve 2 etkin Rust testi geçti

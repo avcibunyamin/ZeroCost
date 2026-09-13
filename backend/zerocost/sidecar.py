@@ -26,6 +26,7 @@ from .knowledge_files import read_knowledge_source
 from .models import KnowledgeIngestionProgress, KnowledgeIngestionResult
 from .knowledge_search import HybridKnowledgeSearch
 from .skills import skill_prompt, validate_skill_requirements
+from .workflows import compile_workflow, validate_workflow_bindings
 
 MAX_FRAME_BYTES = 64 * 1024
 request_adapter = TypeAdapter(Request)
@@ -60,6 +61,10 @@ def dispatch(store: Store, raw: str):
             store.assign_skill(request.params.agent_id, request.params.skill_id)
         elif request.method == "skill.unassign":
             store.unassign_skill(request.params.agent_id, request.params.skill_id)
+        elif request.method == "workflow.create":
+            store.create_workflow(request.params)
+        elif request.method == "workflow.archive":
+            store.archive_workflow(request.params.workflow_id)
         elif request.method != "snapshot":
             raise ValueError("Bu komut asenkron servis gerektirir.")
         return Success(request_id=request.request_id, result=store.snapshot())
@@ -259,6 +264,8 @@ class ChatService:
                 credentials = auth.get('credentials', {}) if isinstance(auth, dict) else {}
                 if not isinstance(credentials, dict):
                     raise ValueError('Kimlik bilgisi zarfı geçersiz.')
+                snapshot = self.store.snapshot()
+                params = compile_workflow(self.store, params, snapshot)
                 snapshot, agents = self.validate_orchestration_agents(params.agent_ids, credentials)
                 if self.orchestrator is None:
                     from .orchestration import OrchestrationEngine
@@ -304,7 +311,8 @@ class ChatService:
                     price_catalog_version=CATALOG_VERSION,
                     workspace_id=params.workspace_id, context_paths=params.context_paths,
                     enabled_tools=params.enabled_tools,
-                    knowledge_collection_ids=params.knowledge_collection_ids)
+                    knowledge_collection_ids=params.knowledge_collection_ids,
+                    workflow_id=params.workflow_id, workflow_version=params.workflow_version)
                 self.output(OrchestrationRoute(run_id=params.run_id, sequence=1,
                     agent_ids=params.agent_ids, reason=reason, planned_model_calls=planned,
                     max_model_calls=params.max_model_calls, max_output_tokens=params.max_output_tokens,
@@ -333,7 +341,11 @@ class ChatService:
                 credentials = auth.get('credentials', {}) if isinstance(auth, dict) else {}
                 if not isinstance(credentials, dict):
                     raise ValueError('Kimlik bilgisi zarfı geçersiz.')
-                _, agents = self.validate_orchestration_agents(spec['agent_ids'], credentials)
+                snapshot, agents = self.validate_orchestration_agents(
+                    spec['agent_ids'], credentials)
+                validate_workflow_bindings(
+                    self.store, spec['workflow_id'], spec['workflow_version'],
+                    spec['agent_ids'], snapshot, require_active=False)
                 for agent in agents:
                     validate_skill_requirements(
                         self.store, agent, enabled_tools=spec['enabled_tools'],

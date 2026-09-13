@@ -8,9 +8,10 @@ import sqlite3
 import struct
 from uuid import uuid4
 from .models import (Agent, AgentInput, Connection, ConnectionInput, SkillPackage,
-                     SkillPackageInput, Snapshot, Workspace, WorkspaceInput)
+                     SkillPackageInput, Snapshot, WorkflowSlotInput, WorkflowTemplate,
+                     WorkflowTemplateInput, Workspace, WorkspaceInput)
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 
 class Store:
@@ -244,6 +245,34 @@ class Store:
                 COMMIT;
             """)
 
+        if current < 12:
+            self.db.executescript("""
+                BEGIN IMMEDIATE;
+                CREATE TABLE workflows (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    version TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    objective_prefix TEXT NOT NULL DEFAULT '',
+                    agent_slots TEXT NOT NULL,
+                    required_tools TEXT NOT NULL DEFAULT '[]',
+                    rounds INTEGER NOT NULL CHECK(rounds BETWEEN 1 AND 3),
+                    max_model_calls INTEGER NOT NULL CHECK(max_model_calls BETWEEN 3 AND 14),
+                    max_output_tokens INTEGER NOT NULL CHECK(max_output_tokens BETWEEN 128 AND 4096),
+                    max_cost_microusd INTEGER NOT NULL CHECK(max_cost_microusd BETWEEN 0 AND 1000000000),
+                    archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(name, version)
+                );
+                ALTER TABLE orchestration_runs ADD COLUMN workflow_id TEXT
+                    REFERENCES workflows(id) ON DELETE RESTRICT;
+                ALTER TABLE orchestration_runs ADD COLUMN workflow_version TEXT;
+                CREATE INDEX workflows_name ON workflows(name,archived,created_at);
+                CREATE INDEX orchestration_workflow ON orchestration_runs(workflow_id);
+                PRAGMA user_version=12;
+                COMMIT;
+            """)
+
     def close(self):
         self.db.close()
 
@@ -257,6 +286,7 @@ class Store:
                     for row in self.db.execute("SELECT * FROM agents ORDER BY rowid")],
             workspaces=[Workspace(**dict(row)) for row in self.db.execute("SELECT * FROM workspaces ORDER BY rowid")],
             skills=self.all_skills(),
+            workflows=self.all_workflows(),
         )
 
     def create_connection(self, value: ConnectionInput):
@@ -355,6 +385,51 @@ class Store:
                              required_permissions=json.loads(row['required_permissions']),
                              provider_hint=row['provider_hint'])
                 for row in self.db.execute("SELECT * FROM skills ORDER BY created_at,rowid")]
+
+    @staticmethod
+    def _workflow_from_row(row) -> WorkflowTemplate:
+        return WorkflowTemplate(
+            id=row['id'], name=row['name'], version=row['version'],
+            description=row['description'], objective_prefix=row['objective_prefix'],
+            agent_slots=[WorkflowSlotInput(**slot) for slot in json.loads(row['agent_slots'])],
+            required_tools=json.loads(row['required_tools']), rounds=row['rounds'],
+            max_model_calls=row['max_model_calls'], max_output_tokens=row['max_output_tokens'],
+            max_cost_microusd=row['max_cost_microusd'], archived=bool(row['archived']))
+
+    def create_workflow(self, value: WorkflowTemplateInput) -> str:
+        skill_ids = {skill_id for slot in value.agent_slots for skill_id in slot.required_skill_ids}
+        if skill_ids:
+            found = {row[0] for row in self.db.execute(
+                f"SELECT id FROM skills WHERE id IN ({','.join('?' for _ in skill_ids)})", tuple(skill_ids))}
+            if found != skill_ids:
+                raise ValueError("Workflow bilinmeyen bir skill paketi içeriyor.")
+        identifier = str(uuid4())
+        slots = [slot.model_dump(mode='json') for slot in value.agent_slots]
+        with self.db:
+            self.db.execute("UPDATE workflows SET archived=1 WHERE name=?", (value.name,))
+            self.db.execute("""INSERT INTO workflows
+                (id,name,version,description,objective_prefix,agent_slots,required_tools,
+                 rounds,max_model_calls,max_output_tokens,max_cost_microusd)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (identifier, value.name, value.version, value.description,
+                 value.objective_prefix, json.dumps(slots), json.dumps(value.required_tools),
+                 value.rounds, value.max_model_calls, value.max_output_tokens,
+                 value.max_cost_microusd))
+        return identifier
+
+    def archive_workflow(self, workflow_id: str):
+        if not self.db.execute("SELECT 1 FROM workflows WHERE id=?", (workflow_id,)).fetchone():
+            raise ValueError("Workflow bulunamadı.")
+        with self.db:
+            self.db.execute("UPDATE workflows SET archived=1 WHERE id=?", (workflow_id,))
+
+    def workflow(self, workflow_id: str) -> WorkflowTemplate | None:
+        row = self.db.execute("SELECT * FROM workflows WHERE id=?", (workflow_id,)).fetchone()
+        return self._workflow_from_row(row) if row else None
+
+    def all_workflows(self) -> list[WorkflowTemplate]:
+        return [self._workflow_from_row(row) for row in self.db.execute(
+            "SELECT * FROM workflows ORDER BY archived,name,created_at DESC,rowid DESC")]
 
     def agent(self, agent_id: str) -> Agent | None:
         return next((agent for agent in self.snapshot().agents if agent.id == agent_id), None)
@@ -508,18 +583,20 @@ class Store:
                             price_catalog_version: str = '2026-09-09', workspace_id: str | None = None,
                             context_paths: list[str] | None = None,
                             enabled_tools: list[str] | None = None,
-                            knowledge_collection_ids: list[str] | None = None):
+                            knowledge_collection_ids: list[str] | None = None,
+                            workflow_id: str | None = None,
+                            workflow_version: str | None = None):
         with self.db:
             self.db.execute("""INSERT INTO orchestration_runs
                 (run_id,objective,rounds,status,routing_mode,route_reason,max_model_calls,
                  max_output_tokens,workspace_id,context_paths,max_cost_microusd,
                  estimated_max_cost_microusd,price_catalog_version,enabled_tools,
-                 knowledge_collection_ids)
-                VALUES (?,?,?,'running',?,?,?,?,?,?,?,?,?,?,?)""",
+                 knowledge_collection_ids,workflow_id,workflow_version)
+                VALUES (?,?,?,'running',?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (run_id, objective, rounds, routing_mode, route_reason, max_model_calls,
                  max_output_tokens, workspace_id, json.dumps(context_paths or []), max_cost_microusd,
                  estimated_max_cost_microusd, price_catalog_version, json.dumps(enabled_tools or []),
-                 json.dumps(knowledge_collection_ids or [])))
+                 json.dumps(knowledge_collection_ids or []), workflow_id, workflow_version))
             self.db.executemany("INSERT INTO orchestration_participants VALUES (?,?,?)",
                                 [(run_id, agent_id, position) for position, agent_id in enumerate(agent_ids)])
 
@@ -620,5 +697,7 @@ class Store:
                                          context_paths=json.loads(row['context_paths']),
                                          enabled_tools=json.loads(row['enabled_tools']),
                                          knowledge_collection_ids=json.loads(row['knowledge_collection_ids']),
+                                         workflow_id=row['workflow_id'],
+                                         workflow_version=row['workflow_version'],
                                          tool_action=tool_action, messages=messages))
         return OrchestrationHistory(runs=runs)
