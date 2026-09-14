@@ -96,15 +96,18 @@ class ChatService:
         self.tasks = {}
         self.orchestrator = None
 
-    async def run_orchestration(self, params, credentials, *, resume=None, initial_sequence=0):
+    async def run_orchestration(self, params, credentials, *, resume=None, initial_sequence=0,
+                                checkpoint_thread_id=None, continue_checkpoint=False):
         if self.orchestrator is None:
             # Keep normal startup fast; LangGraph is loaded only for an agent-table run.
             from .orchestration import OrchestrationEngine
             self.orchestrator = OrchestrationEngine(self.store, self.output,
                                                     self.provider_factory,
                                                     self.embedding_factory)
-        await self.orchestrator.run(params, credentials, resume=resume,
-                                    initial_sequence=initial_sequence)
+        await self.orchestrator.run(
+            params, credentials, resume=resume, initial_sequence=initial_sequence,
+            checkpoint_thread_id=checkpoint_thread_id,
+            continue_checkpoint=continue_checkpoint)
 
     def validate_orchestration_agents(self, agent_ids, credentials):
         snapshot = self.store.snapshot()
@@ -351,10 +354,45 @@ class ChatService:
                         self.store, agent, enabled_tools=spec['enabled_tools'],
                         has_knowledge=bool(spec['knowledge_collection_ids']))
                 params = SimpleNamespace(**spec)
+                uncertain = (spec['error_class'] == 'uncertain_tool' and
+                             spec['tool_status'] in ('uncertain', 'completed'))
+                if uncertain and request.params.decision == 'reject':
+                    self.store.finish_orchestration(
+                        params.run_id, 'cancelled', 'Belirsiz araç sonucu nedeniyle kullanıcı görevi durdurdu.')
+                    result = Accepted(run_id=params.run_id)
+                    return Success(request_id=request.request_id, result=result)
+                if spec['tool_status'] == 'waiting':
+                    self.store.update_tool_action(params.run_id, 'approved')
                 self.store.set_orchestration_status(params.run_id, 'running')
                 task = asyncio.create_task(self.run_orchestration(
-                    params, credentials, resume=request.params.decision,
-                    initial_sequence=spec['event_sequence']))
+                    params, credentials, resume=None if uncertain else request.params.decision,
+                    initial_sequence=spec['event_sequence'],
+                    checkpoint_thread_id=spec['parent_run_id'] or spec['run_id'],
+                    continue_checkpoint=uncertain))
+                self.tasks[params.run_id] = task
+                task.add_done_callback(lambda _: self.tasks.pop(params.run_id, None))
+                result = Accepted(run_id=params.run_id)
+            elif request.method == 'orchestration.retry':
+                if self.tasks or self.store.waiting_orchestration():
+                    raise ValueError('Önce devam eden veya onay bekleyen görevi tamamlayın.')
+                source = self.store.retry_source(request.params.run_id)
+                credentials = auth.get('credentials', {}) if isinstance(auth, dict) else {}
+                if not isinstance(credentials, dict):
+                    raise ValueError('Kimlik bilgisi zarfı geçersiz.')
+                snapshot, agents = self.validate_orchestration_agents(source['agent_ids'], credentials)
+                validate_workflow_bindings(
+                    self.store, source['workflow_id'], source['workflow_version'],
+                    source['agent_ids'], snapshot, require_active=False)
+                for agent in agents:
+                    validate_skill_requirements(
+                        self.store, agent, enabled_tools=source['enabled_tools'],
+                        has_knowledge=bool(source['knowledge_collection_ids']))
+                spec, checkpoint_thread_id = self.store.create_retry(
+                    request.params.run_id, request.params.new_run_id)
+                params = SimpleNamespace(**spec)
+                task = asyncio.create_task(self.run_orchestration(
+                    params, credentials, checkpoint_thread_id=checkpoint_thread_id,
+                    continue_checkpoint=True))
                 self.tasks[params.run_id] = task
                 task.add_done_callback(lambda _: self.tasks.pop(params.run_id, None))
                 result = Accepted(run_id=params.run_id)

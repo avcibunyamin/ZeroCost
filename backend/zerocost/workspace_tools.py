@@ -167,3 +167,12 @@ def apply_write(store, proposal: dict):
         if os.path.exists(temporary):
             os.unlink(temporary)
     return f'{proposal["path"]} atomik olarak yazıldı ({len(encoded)} bayt).'
+
+
+def current_write_hash(store, proposal: dict) -> str:
+    """Resolve the approved target again and hash its current bytes."""
+    _, _, target = _write_target(
+        store, proposal['agent_id'], proposal['workspace_id'], proposal['path'])
+    if not target.exists():
+        return 'missing'
+    return hashlib.sha256(target.read_bytes()).hexdigest()

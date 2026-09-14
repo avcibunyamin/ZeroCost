@@ -3,7 +3,8 @@ import json
 
 import httpx
 
-from zerocost.providers.base import Message, ProviderError
+from zerocost.providers.base import (Message, PermanentProviderError, ProviderError,
+                                     RetryableProviderError)
 from zerocost.providers.ollama import OllamaProvider
 
 
@@ -58,5 +59,29 @@ def test_truncated_stream_is_not_reported_as_complete():
             assert "tamamlanma işareti" in str(error)
         else:
             raise AssertionError("Truncated stream was accepted")
+
+    asyncio.run(scenario())
+
+
+def test_http_status_is_classified_for_retry_safety():
+    async def collect(status):
+        async def handler(_request):
+            return httpx.Response(status)
+        provider = OllamaProvider("model", httpx.MockTransport(handler))
+        return [chunk async for chunk in provider.stream_reply([Message(role="user", content="hi")])]
+
+    async def scenario():
+        try:
+            await collect(503)
+        except RetryableProviderError:
+            pass
+        else:
+            raise AssertionError("503 was not classified as retryable")
+        try:
+            await collect(404)
+        except PermanentProviderError:
+            pass
+        else:
+            raise AssertionError("404 was not classified as permanent")
 
     asyncio.run(scenario())

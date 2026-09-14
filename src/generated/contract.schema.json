@@ -1578,6 +1578,20 @@
           "title": "Message",
           "type": "string"
         },
+        "error_class": {
+          "default": "permanent",
+          "enum": [
+            "retryable",
+            "permanent"
+          ],
+          "title": "Error Class",
+          "type": "string"
+        },
+        "failed_node": {
+          "default": "",
+          "title": "Failed Node",
+          "type": "string"
+        },
         "is_final": {
           "const": true,
           "default": true,
@@ -1591,6 +1605,8 @@
         "run_id",
         "sequence",
         "message",
+        "error_class",
+        "failed_node",
         "is_final"
       ],
       "title": "OrchestrationError",
@@ -1733,6 +1749,128 @@
         "is_final"
       ],
       "title": "OrchestrationMessageEnd",
+      "type": "object"
+    },
+    "OrchestrationRetryInput": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "new_run_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "New Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "new_run_id"
+      ],
+      "title": "OrchestrationRetryInput",
+      "type": "object"
+    },
+    "OrchestrationRetryRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "orchestration.retry",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/OrchestrationRetryInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "OrchestrationRetryRequest",
+      "type": "object"
+    },
+    "OrchestrationRetrying": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "type": {
+          "const": "orchestration_retrying",
+          "default": "orchestration_retrying",
+          "title": "Type",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "analysis",
+            "review",
+            "synthesis"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "attempt": {
+          "maximum": 3,
+          "minimum": 2,
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "is_final": {
+          "const": false,
+          "default": false,
+          "title": "Is Final",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "type",
+        "run_id",
+        "sequence",
+        "agent_id",
+        "phase",
+        "attempt",
+        "message",
+        "is_final"
+      ],
+      "title": "OrchestrationRetrying",
       "type": "object"
     },
     "OrchestrationRoute": {
@@ -1946,6 +2084,47 @@
           ],
           "title": "Workflow Version"
         },
+        "attempt": {
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "parent_run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parent Run Id"
+        },
+        "resumed_from_node": {
+          "title": "Resumed From Node",
+          "type": "string"
+        },
+        "failed_node": {
+          "title": "Failed Node",
+          "type": "string"
+        },
+        "error_class": {
+          "enum": [
+            "",
+            "retryable",
+            "permanent",
+            "uncertain_tool"
+          ],
+          "title": "Error Class",
+          "type": "string"
+        },
+        "cumulative_model_calls": {
+          "title": "Cumulative Model Calls",
+          "type": "integer"
+        },
+        "cumulative_cost_microusd": {
+          "title": "Cumulative Cost Microusd",
+          "type": "integer"
+        },
         "tool_action": {
           "anyOf": [
             {
@@ -2002,6 +2181,13 @@
         "knowledge_collection_ids",
         "workflow_id",
         "workflow_version",
+        "attempt",
+        "parent_run_id",
+        "resumed_from_node",
+        "failed_node",
+        "error_class",
+        "cumulative_model_calls",
+        "cumulative_cost_microusd",
         "tool_action",
         "status",
         "error",
@@ -3102,11 +3288,23 @@
           "enum": [
             "waiting",
             "approved",
+            "executing",
+            "uncertain",
             "rejected",
             "completed",
             "failed"
           ],
           "title": "Status",
+          "type": "string"
+        },
+        "args_hash": {
+          "default": "",
+          "title": "Args Hash",
+          "type": "string"
+        },
+        "content_hash": {
+          "default": "",
+          "title": "Content Hash",
           "type": "string"
         },
         "result": {
@@ -3125,6 +3323,8 @@
         "preview",
         "risk",
         "status",
+        "args_hash",
+        "content_hash",
         "result"
       ],
       "title": "ToolAction",
@@ -3834,6 +4034,7 @@
           "orchestration.approve": "#/$defs/OrchestrationApprovalRequest",
           "orchestration.cancel": "#/$defs/OrchestrationCancelRequest",
           "orchestration.history": "#/$defs/OrchestrationHistoryRequest",
+          "orchestration.retry": "#/$defs/OrchestrationRetryRequest",
           "orchestration.start": "#/$defs/OrchestrationStartRequest",
           "pricing.catalog": "#/$defs/PricingCatalogRequest",
           "skill.assign": "#/$defs/SkillAssignRequest",
@@ -3894,6 +4095,9 @@
         },
         {
           "$ref": "#/$defs/OrchestrationApprovalRequest"
+        },
+        {
+          "$ref": "#/$defs/OrchestrationRetryRequest"
         },
         {
           "$ref": "#/$defs/OrchestrationHistoryRequest"
@@ -3979,6 +4183,9 @@
         },
         {
           "$ref": "#/$defs/OrchestrationToolResult"
+        },
+        {
+          "$ref": "#/$defs/OrchestrationRetrying"
         },
         {
           "$ref": "#/$defs/KnowledgeIngestionProgress"

@@ -11,7 +11,7 @@ from .models import (Agent, AgentInput, Connection, ConnectionInput, SkillPackag
                      SkillPackageInput, Snapshot, WorkflowSlotInput, WorkflowTemplate,
                      WorkflowTemplateInput, Workspace, WorkspaceInput)
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 
 class Store:
@@ -272,6 +272,65 @@ class Store:
                 PRAGMA user_version=12;
                 COMMIT;
             """)
+
+        if current < 13:
+            self.db.execute("PRAGMA foreign_keys=OFF")
+            self.db.execute("PRAGMA legacy_alter_table=ON")
+            self.db.executescript("""
+                BEGIN IMMEDIATE;
+                ALTER TABLE orchestration_runs RENAME TO orchestration_runs_v12;
+                CREATE TABLE orchestration_runs (
+                    run_id TEXT PRIMARY KEY, objective TEXT NOT NULL,
+                    rounds INTEGER NOT NULL CHECK(rounds BETWEEN 1 AND 3),
+                    status TEXT NOT NULL CHECK(status IN ('running','waiting_approval','completed','cancelled','failed','interrupted')),
+                    error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    routing_mode TEXT NOT NULL DEFAULT 'manual' CHECK(routing_mode IN ('manual','auto')),
+                    route_reason TEXT NOT NULL DEFAULT '',
+                    max_model_calls INTEGER NOT NULL DEFAULT 5 CHECK(max_model_calls BETWEEN 3 AND 14),
+                    max_output_tokens INTEGER NOT NULL DEFAULT 512 CHECK(max_output_tokens BETWEEN 128 AND 4096),
+                    used_model_calls INTEGER NOT NULL DEFAULT 0,
+                    workspace_id TEXT REFERENCES workspaces(id), context_paths TEXT NOT NULL DEFAULT '[]',
+                    max_cost_microusd INTEGER NOT NULL DEFAULT 5000000,
+                    estimated_max_cost_microusd INTEGER NOT NULL DEFAULT 0,
+                    actual_cost_microusd INTEGER NOT NULL DEFAULT 0,
+                    input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
+                    price_catalog_version TEXT NOT NULL DEFAULT '2026-09-09',
+                    enabled_tools TEXT NOT NULL DEFAULT '[]', tool_name TEXT NOT NULL DEFAULT '',
+                    tool_request TEXT NOT NULL DEFAULT '{}', tool_preview TEXT NOT NULL DEFAULT '',
+                    tool_risk TEXT NOT NULL DEFAULT '', tool_status TEXT NOT NULL DEFAULT '',
+                    tool_result TEXT NOT NULL DEFAULT '', event_sequence INTEGER NOT NULL DEFAULT 0,
+                    knowledge_collection_ids TEXT NOT NULL DEFAULT '[]',
+                    workflow_id TEXT REFERENCES workflows(id) ON DELETE RESTRICT,
+                    workflow_version TEXT, attempt INTEGER NOT NULL DEFAULT 1,
+                    parent_run_id TEXT
+                    REFERENCES orchestration_runs(run_id) ON DELETE RESTRICT,
+                    resumed_from_node TEXT NOT NULL DEFAULT '', failed_node TEXT NOT NULL DEFAULT '',
+                    error_class TEXT NOT NULL DEFAULT '', tool_args_hash TEXT NOT NULL DEFAULT '',
+                    tool_content_hash TEXT NOT NULL DEFAULT ''
+                );
+                INSERT INTO orchestration_runs
+                    (run_id,objective,rounds,status,error,created_at,routing_mode,route_reason,
+                     max_model_calls,max_output_tokens,used_model_calls,workspace_id,context_paths,
+                     max_cost_microusd,estimated_max_cost_microusd,actual_cost_microusd,input_tokens,
+                     output_tokens,price_catalog_version,enabled_tools,tool_name,tool_request,
+                     tool_preview,tool_risk,tool_status,tool_result,event_sequence,
+                     knowledge_collection_ids,workflow_id,workflow_version)
+                    SELECT run_id,objective,rounds,status,error,created_at,routing_mode,route_reason,
+                     max_model_calls,max_output_tokens,used_model_calls,workspace_id,context_paths,
+                     max_cost_microusd,estimated_max_cost_microusd,actual_cost_microusd,input_tokens,
+                     output_tokens,price_catalog_version,enabled_tools,tool_name,tool_request,
+                     tool_preview,tool_risk,tool_status,tool_result,event_sequence,
+                     knowledge_collection_ids,workflow_id,workflow_version
+                    FROM orchestration_runs_v12;
+                DROP TABLE orchestration_runs_v12;
+                CREATE INDEX orchestration_created ON orchestration_runs(created_at);
+                CREATE INDEX orchestration_workflow ON orchestration_runs(workflow_id);
+                CREATE INDEX orchestration_parent ON orchestration_runs(parent_run_id,attempt);
+                PRAGMA user_version=13;
+                COMMIT;
+            """)
+            self.db.execute("PRAGMA legacy_alter_table=OFF")
+            self.db.execute("PRAGMA foreign_keys=ON")
 
     def close(self):
         self.db.close()
@@ -571,9 +630,30 @@ class Store:
             self.db.execute("UPDATE chat_runs SET content=?,status=?,error=? WHERE run_id=?", (content, status, error, run_id))
 
     def recover_runs(self):
+        from .workspace_tools import current_write_hash
+        for row in self.db.execute("""SELECT run_id,tool_request,tool_content_hash
+                FROM orchestration_runs WHERE status='running' AND
+                tool_status='executing' AND tool_name='workspace.write'""").fetchall():
+            try:
+                applied = current_write_hash(self, json.loads(row['tool_request'])) == row['tool_content_hash']
+            except (ValueError, KeyError, json.JSONDecodeError):
+                applied = False
+            if applied:
+                with self.db:
+                    self.db.execute("""UPDATE orchestration_runs SET status='waiting_approval',
+                        tool_status='completed',error_class='uncertain_tool',
+                        tool_result='Hedef içerik hash ile doğrulandı; yazma yeniden uygulanmadı.',
+                        error='Yazma tamamlandı; görev checkpoint üzerinden sürdürülebilir.'
+                        WHERE run_id=?""", (row['run_id'],))
         with self.db:
             self.db.execute("UPDATE chat_runs SET status='interrupted',error='Uygulama bağlantısı kesildi.' WHERE status='running'")
-            self.db.execute("UPDATE orchestration_runs SET status='interrupted',error='Uygulama bağlantısı kesildi.' WHERE status='running'")
+            self.db.execute("""UPDATE orchestration_runs SET status='waiting_approval',
+                tool_status='uncertain',error_class='uncertain_tool',
+                error='Araç çalıştırılırken bağlantı kesildi; sonuç belirsiz.'
+                WHERE status='running' AND tool_status='executing'""")
+            self.db.execute("""UPDATE orchestration_runs SET status='interrupted',
+                error='Uygulama bağlantısı kesildi.'
+                WHERE status='running'""")
 
     def start_orchestration(self, run_id: str, objective: str, rounds: int, agent_ids: list[str],
                             *, routing_mode: str = 'manual', route_reason: str = '',
@@ -585,18 +665,22 @@ class Store:
                             enabled_tools: list[str] | None = None,
                             knowledge_collection_ids: list[str] | None = None,
                             workflow_id: str | None = None,
-                            workflow_version: str | None = None):
+                            workflow_version: str | None = None,
+                            attempt: int = 1, parent_run_id: str | None = None,
+                            resumed_from_node: str = ''):
         with self.db:
             self.db.execute("""INSERT INTO orchestration_runs
                 (run_id,objective,rounds,status,routing_mode,route_reason,max_model_calls,
                  max_output_tokens,workspace_id,context_paths,max_cost_microusd,
                  estimated_max_cost_microusd,price_catalog_version,enabled_tools,
-                 knowledge_collection_ids,workflow_id,workflow_version)
-                VALUES (?,?,?,'running',?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 knowledge_collection_ids,workflow_id,workflow_version,attempt,parent_run_id,
+                 resumed_from_node)
+                VALUES (?,?,?,'running',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (run_id, objective, rounds, routing_mode, route_reason, max_model_calls,
                  max_output_tokens, workspace_id, json.dumps(context_paths or []), max_cost_microusd,
                  estimated_max_cost_microusd, price_catalog_version, json.dumps(enabled_tools or []),
-                 json.dumps(knowledge_collection_ids or []), workflow_id, workflow_version))
+                 json.dumps(knowledge_collection_ids or []), workflow_id, workflow_version,
+                 attempt, parent_run_id, resumed_from_node))
             self.db.executemany("INSERT INTO orchestration_participants VALUES (?,?,?)",
                                 [(run_id, agent_id, position) for position, agent_id in enumerate(agent_ids)])
 
@@ -606,15 +690,23 @@ class Store:
             self.db.execute("INSERT INTO orchestration_messages VALUES (?,?,?,?,?)",
                             (run_id, sequence, agent_id, phase, content))
 
-    def finish_orchestration(self, run_id: str, status: str, error: str = ""):
+    def finish_orchestration(self, run_id: str, status: str, error: str = "",
+                             error_class: str = '', failed_node: str = ''):
         with self.db:
-            self.db.execute("UPDATE orchestration_runs SET status=?,error=? WHERE run_id=?",
-                            (status, error, run_id))
+            self.db.execute("""UPDATE orchestration_runs SET status=?,error=?,
+                error_class=?,failed_node=? WHERE run_id=?""",
+                (status, error, error_class, failed_node, run_id))
 
     def set_orchestration_status(self, run_id: str, status: str, error: str = ""):
         self.finish_orchestration(run_id, status, error)
 
     def increment_model_calls(self, run_id: str):
+        spec = self.orchestration_spec(run_id)
+        root = spec['parent_run_id'] or run_id
+        used = self.db.execute("""SELECT COALESCE(SUM(used_model_calls),0) FROM orchestration_runs
+            WHERE run_id=? OR parent_run_id=?""", (root, root)).fetchone()[0]
+        if used >= spec['max_model_calls']:
+            raise ValueError('Model çağrısı aile bütçesi tükendi.')
         with self.db:
             self.db.execute("UPDATE orchestration_runs SET used_model_calls=used_model_calls+1 WHERE run_id=?",
                             (run_id,))
@@ -625,24 +717,69 @@ class Store:
                 input_tokens=input_tokens+?, output_tokens=output_tokens+?,
                 actual_cost_microusd=actual_cost_microusd+? WHERE run_id=?""",
                 (input_tokens, output_tokens, cost, run_id))
-        row = self.db.execute("""SELECT input_tokens,output_tokens,actual_cost_microusd
-            FROM orchestration_runs WHERE run_id=?""", (run_id,)).fetchone()
+        spec = self.orchestration_spec(run_id)
+        root = spec['parent_run_id'] or run_id
+        row = self.db.execute("""SELECT COALESCE(SUM(input_tokens),0) AS input_tokens,
+            COALESCE(SUM(output_tokens),0) AS output_tokens,
+            COALESCE(SUM(actual_cost_microusd),0) AS actual_cost_microusd
+            FROM orchestration_runs WHERE run_id=? OR parent_run_id=?""", (root, root)).fetchone()
         return dict(row)
 
     def set_tool_action(self, run_id: str, proposal: dict, status: str = 'waiting', result: str = ''):
         public = {key: proposal.get(key) for key in (
             'tool', 'path', 'command', 'cwd', 'workspace_id', 'agent_id',
             'collection_id', 'query', 'limit')}
+        canonical = json.dumps(public, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+        args_hash = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+        content_hash = (hashlib.sha256(proposal['content'].encode('utf-8')).hexdigest()
+                        if proposal['tool'] == 'workspace.write' else '')
         with self.db:
             self.db.execute("""UPDATE orchestration_runs SET tool_name=?,tool_request=?,
-                tool_preview=?,tool_risk=?,tool_status=?,tool_result=? WHERE run_id=?""",
+                tool_preview=?,tool_risk=?,tool_status=?,tool_result=?,tool_args_hash=?,
+                tool_content_hash=? WHERE run_id=?""",
                 (proposal['tool'], json.dumps(public), proposal['preview'], proposal['risk'],
-                 status, result, run_id))
+                 status, result, args_hash, content_hash, run_id))
 
     def update_tool_action(self, run_id: str, status: str, result: str = ''):
         with self.db:
             self.db.execute("UPDATE orchestration_runs SET tool_status=?,tool_result=? WHERE run_id=?",
                             (status, result[:65536], run_id))
+
+    def tool_status(self, run_id: str):
+        row = self.db.execute("""SELECT tool_status,tool_result,tool_content_hash
+            FROM orchestration_runs WHERE run_id=?""", (run_id,)).fetchone()
+        return dict(row) if row else None
+
+    def retry_source(self, run_id: str):
+        spec = self.orchestration_spec(run_id)
+        if spec is None or spec['status'] != 'failed' or spec['error_class'] != 'retryable':
+            raise ValueError('Yalnız yeniden denenebilir başarısız görev sürdürülebilir.')
+        return spec
+
+    def create_retry(self, source_run_id: str, new_run_id: str):
+        source = self.retry_source(source_run_id)
+        root = source['parent_run_id'] or source_run_id
+        family = self.db.execute("""SELECT COALESCE(SUM(used_model_calls),0) AS calls,
+            COALESCE(SUM(actual_cost_microusd),0) AS cost FROM orchestration_runs
+            WHERE run_id=? OR parent_run_id=?""", (root, root)).fetchone()
+        if family['calls'] >= source['max_model_calls']:
+            raise ValueError('Model çağrısı aile bütçesi tükendi.')
+        if family['cost'] >= source['max_cost_microusd']:
+            raise ValueError('Maliyet aile bütçesi tükendi.')
+        attempt = self.db.execute("""SELECT COALESCE(MAX(attempt),0)+1 FROM orchestration_runs
+            WHERE run_id=? OR parent_run_id=?""", (root, root)).fetchone()[0]
+        self.start_orchestration(
+            new_run_id, source['objective'], source['rounds'], source['agent_ids'],
+            routing_mode=source['routing_mode'], route_reason='Checkpoint üzerinden kullanıcı yeniden denemesi.',
+            max_model_calls=source['max_model_calls'], max_output_tokens=source['max_output_tokens'],
+            max_cost_microusd=source['max_cost_microusd'],
+            estimated_max_cost_microusd=source['estimated_max_cost_microusd'],
+            price_catalog_version=source['price_catalog_version'], workspace_id=source['workspace_id'],
+            context_paths=source['context_paths'], enabled_tools=source['enabled_tools'],
+            knowledge_collection_ids=source['knowledge_collection_ids'],
+            workflow_id=source['workflow_id'], workflow_version=source['workflow_version'],
+            attempt=attempt, parent_run_id=root, resumed_from_node=source['failed_node'])
+        return self.orchestration_spec(new_run_id), root
 
     def set_event_sequence(self, run_id: str, sequence: int):
         with self.db:
@@ -681,7 +818,12 @@ class Store:
                     command=request.get('command') or [], preview=row['tool_preview'],
                     collection_id=request.get('collection_id') or '', query=request.get('query') or '',
                     limit=request.get('limit') or 5, risk=row['tool_risk'],
-                    status=row['tool_status'], result=row['tool_result'])
+                    status=row['tool_status'], result=row['tool_result'],
+                    args_hash=row['tool_args_hash'], content_hash=row['tool_content_hash'])
+            root = row['parent_run_id'] or row['run_id']
+            cumulative = self.db.execute("""SELECT COALESCE(SUM(used_model_calls),0),
+                COALESCE(SUM(actual_cost_microusd),0) FROM orchestration_runs
+                WHERE run_id=? OR parent_run_id=?""", (root, root)).fetchone()
             runs.append(OrchestrationRun(run_id=row['run_id'], objective=row['objective'], rounds=row['rounds'],
                                          status=row['status'], error=row['error'], agent_ids=agent_ids,
                                          routing_mode=row['routing_mode'], route_reason=row['route_reason'],
@@ -699,5 +841,10 @@ class Store:
                                          knowledge_collection_ids=json.loads(row['knowledge_collection_ids']),
                                          workflow_id=row['workflow_id'],
                                          workflow_version=row['workflow_version'],
+                                         attempt=row['attempt'], parent_run_id=row['parent_run_id'],
+                                         resumed_from_node=row['resumed_from_node'],
+                                         failed_node=row['failed_node'], error_class=row['error_class'],
+                                         cumulative_model_calls=cumulative[0],
+                                         cumulative_cost_microusd=cumulative[1],
                                          tool_action=tool_action, messages=messages))
         return OrchestrationHistory(runs=runs)

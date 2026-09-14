@@ -41,6 +41,7 @@ fn allowed_event_type(kind: &str) -> bool {
             | "orchestration_approval_required"
             | "orchestration_usage"
             | "orchestration_tool_result"
+            | "orchestration_retrying"
             | "knowledge_ingestion_progress"
     )
 }
@@ -241,7 +242,11 @@ fn route_request(client: &Sidecar, mut request: Value) -> Result<Value, String> 
     let method = request["method"].as_str().unwrap_or("").to_owned();
     if !matches!(
         method.as_str(),
-        "vault" | "chat.start" | "orchestration.start" | "orchestration.approve"
+        "vault"
+            | "chat.start"
+            | "orchestration.start"
+            | "orchestration.approve"
+            | "orchestration.retry"
     ) {
         return client.exchange(&request);
     }
@@ -278,7 +283,10 @@ fn route_request(client: &Sidecar, mut request: Value) -> Result<Value, String> 
             .as_str()
             .ok_or("Ajan kimliği eksik")?;
         vec![agent_connection(agent_id)?.to_owned()]
-    } else if method == "orchestration.approve" {
+    } else if matches!(
+        method.as_str(),
+        "orchestration.approve" | "orchestration.retry"
+    ) {
         let history = client.exchange(&json!({"method":"orchestration.history",
             "protocol_version":1,
             "request_id":format!("history-{}", request["request_id"].as_str().unwrap())}))?;

@@ -28,6 +28,7 @@ type Approval = {
   command: string[];
   preview: string;
   risk: "medium" | "high" | null;
+  uncertain: boolean;
 };
 
 export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
@@ -51,6 +52,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
   const [stopping, setStopping] = useState(false);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [error, setError] = useState("");
+  const [retryNotice, setRetryNotice] = useState("");
   const runId = useRef<string | null>(null);
   const eventSequence = useRef(0);
   const workflow: WorkflowTemplate | undefined = snapshot?.workflows.find(
@@ -74,8 +76,11 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
           paths: [], tool: pending.tool_action.tool,
           path: pending.tool_action.path, command: pending.tool_action.command,
           preview: pending.tool_action.preview, risk: pending.tool_action.risk,
+          uncertain: pending.tool_action.status === "uncertain" ||
+            (pending.error_class === "uncertain_tool" && pending.tool_action.status === "completed"),
         } : { permission: "workspace.read", workspaceId: pending.workspace_id,
-          paths: pending.context_paths, tool: null, path: "", command: [], preview: "", risk: null });
+          paths: pending.context_paths, tool: null, path: "", command: [], preview: "", risk: null,
+          uncertain: false });
     }
   }
 
@@ -138,6 +143,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
         return;
       eventSequence.current = payload.sequence;
       if (payload.type === "orchestration_chunk") {
+        setRetryNotice("");
         setStreaming((current) => ({
           agent_id: payload.agent_id,
           phase: payload.phase,
@@ -148,6 +154,9 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               ? current.content + payload.token
               : payload.token,
         }));
+      } else if (payload.type === "orchestration_retrying") {
+        setStreaming(null);
+        setRetryNotice(payload.message);
       } else if (payload.type === "orchestration_message_end") {
         setRuns((items) =>
           items.map((run) =>
@@ -206,6 +215,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
           command: payload.command,
           preview: payload.preview,
           risk: payload.risk,
+          uncertain: false,
         });
         setRuns((items) =>
           items.map((run) =>
@@ -220,10 +230,11 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
             ? { ...run.tool_action, status: payload.status, result: payload.result }
             : { tool: payload.tool, path: "", command: [], collection_id: "", query: "",
                 limit: 5, preview: "", risk: "medium", status: payload.status,
-                result: payload.result } }
+                result: payload.result, args_hash: "", content_hash: "" } }
           : run));
       } else {
         if (payload.type === "orchestration_error") setError(payload.message);
+        setRetryNotice("");
         setActive(false);
         setStopping(false);
         setStreaming(null);
@@ -304,6 +315,13 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       tool_action: null,
       status: "running",
       error: "",
+      attempt: 1,
+      parent_run_id: null,
+      resumed_from_node: "",
+      failed_node: "",
+      error_class: "",
+      cumulative_model_calls: 0,
+      cumulative_cost_microusd: 0,
       messages: [],
     };
     runId.current = id;
@@ -311,6 +329,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
     setRuns((items) => [run, ...items]);
     setActive(true);
     setError("");
+    setRetryNotice("");
     try {
       await rpc({
         method: "orchestration.start",
@@ -375,12 +394,40 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
     }
   }
 
+  async function retry(run: OrchestrationRun) {
+    if (active || run.status !== "failed" || run.error_class !== "retryable") return;
+    const id = crypto.randomUUID();
+    runId.current = id;
+    eventSequence.current = 0;
+    setActive(true);
+    setError("");
+    setRetryNotice("Checkpoint üzerinden başarısız düğüm yeniden başlatılıyor.");
+    try {
+      await rpc({
+        method: "orchestration.retry",
+        params: { run_id: run.run_id, new_run_id: id },
+      });
+      await refresh();
+    } catch (e) {
+      runId.current = null;
+      setActive(false);
+      setError(e instanceof Error ? e.message : String(e));
+      await refresh().catch(() => undefined);
+    }
+  }
+
   const current = runs[0];
   const currentWorkflow = current?.workflow_id
     ? snapshot?.workflows.find((item) => item.id === current.workflow_id)
     : undefined;
+  const lineageRoot = current?.parent_run_id ?? current?.run_id;
+  const lineageMessages = lineageRoot
+    ? runs.filter((run) => run.run_id === lineageRoot || run.parent_run_id === lineageRoot)
+      .sort((left, right) => left.attempt - right.attempt)
+      .flatMap((run) => run.messages)
+    : [];
   const messages: (OrchestrationMessage | StreamingMessage)[] = [
-    ...(current?.messages ?? []),
+    ...lineageMessages,
     ...(streaming ? [streaming] : []),
   ];
   const name = (id: string) =>
@@ -430,6 +477,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
           {error}
         </div>
       )}
+      {retryNotice && <div className="banner">{retryNotice}</div>}
       <div className="orchestration-layout">
         <form className="panel orchestration-form" onSubmit={start}>
           <div className="panel-heading">
@@ -654,13 +702,16 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
             <div className="approval-card" role="alert">
               <div>
                 <ShieldCheck size={20} />
-                <strong>{approval.permission === "workspace.read" ? "Dosya okuma onayı" : "Araç çalıştırma onayı"}</strong>
+                <strong>{approval.uncertain ? "Araç sonucu belirsiz" :
+                  approval.permission === "workspace.read" ? "Dosya okuma onayı" : "Araç çalıştırma onayı"}</strong>
               </div>
               {approval.permission === "workspace.read" ? <>
                 <p>Ajanlar şu dosyaları yalnız bu görev için okuyacak:</p>
                 <ul>{approval.paths.map((path) => <li key={path}>{path}</li>)}</ul>
               </> : <>
-                <p>{approval.tool} · risk: {approval.risk}</p>
+                <p>{approval.uncertain
+                  ? `${approval.tool} çalıştırılırken uygulama kapandı. Araç çalışmış olabilir; yeniden çalıştırmadan devam edebilirsiniz.`
+                  : `${approval.tool} · risk: ${approval.risk}`}</p>
                 {approval.path && <code>{approval.path}</code>}
                 {approval.command.length > 0 && <code>argv: {JSON.stringify(approval.command)}</code>}
                 <pre>{approval.preview}</pre>
@@ -668,11 +719,11 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               <div className="approval-actions">
                 <button type="button" className="button primary"
                   onClick={() => void decide("approve")} disabled={stopping}>
-                  Onayla ve devam et
+                  {approval.uncertain ? "Yeniden çalıştırmadan devam et" : "Onayla ve devam et"}
                 </button>
                 <button type="button" className="button secondary"
                   onClick={() => void decide("reject")} disabled={stopping}>
-                  Reddet
+                  {approval.uncertain ? "Görevi durdur" : "Reddet"}
                 </button>
               </div>
             </div>
@@ -726,10 +777,13 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
                   Workflow: {currentWorkflow?.name ?? current.workflow_id} v{current.workflow_version}
                 </small>
               )}
+              {current && current.attempt > 1 && (
+                <small>Deneme {current.attempt} · {current.resumed_from_node} düğümünden devam</small>
+              )}
               {current?.route_reason && (
                 <small>
-                  {current.route_reason} · {current.used_model_calls}/{current.max_model_calls} çağrı
-                  {` · $${(current.actual_cost_microusd / 1_000_000).toFixed(6)} kullanılan`}
+                  {current.route_reason} · {current.cumulative_model_calls}/{current.max_model_calls} çağrı
+                  {` · $${(current.cumulative_cost_microusd / 1_000_000).toFixed(6)} kullanılan`}
                   {` · $${(current.estimated_max_cost_microusd / 1_000_000).toFixed(4)} üst tahmin`}
                   {` · katalog ${current.price_catalog_version}`}
                 </small>
@@ -758,7 +812,19 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               <p>{message.content || "Yanıt hazırlanıyor…"}</p>
             </article>
           ))}
-          {current?.error && <div className="form-error">{current.error}</div>}
+          {current?.error && <div className="form-error">
+            {current.error_class === "retryable" && "Geçici sağlayıcı hatası · "}
+            {current.error_class === "permanent" && "Kalıcı hata · "}
+            {current.error_class === "uncertain_tool" && "Belirsiz araç sonucu · "}
+            {current.error}
+            {current.failed_node && <small> Düğüm: {current.failed_node}</small>}
+          </div>}
+          {current?.status === "failed" && current.error_class === "retryable" &&
+            current.cumulative_model_calls < current.max_model_calls && !active && (
+              <button type="button" className="button primary" onClick={() => void retry(current)}>
+                Başarısız düğümü yeniden dene
+              </button>
+            )}
           {current?.tool_action && <div className="approval-card">
             <strong>{current.tool_action.tool} · {current.tool_action.status}</strong>
             {current.tool_action.result && <pre>{current.tool_action.result}</pre>}

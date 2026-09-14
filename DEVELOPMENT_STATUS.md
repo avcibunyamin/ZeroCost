@@ -238,3 +238,17 @@ Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırıl
 - Workflow oluşturma/arşivleme paneli, dinamik asgari çağrı bütçesi ve Ajan masasında slot bağlama arayüzü
 - Pydantic → TypeScript kapalı IPC sözleşmesi ve ADR-0002 mimari kararı
 - 103 Python, 14 JavaScript sözleşme ve 2 etkin Rust testi geçti
+
+## Dayanıklı düğüm retry ve belirsiz araç kurtarma
+
+- `RetryableProviderError` / `PermanentProviderError` sınırı; timeout, bağlantı, 429 ve 5xx eşlemesi
+- Aynı LLM düğümünde bütçeye tabi, en fazla üç 250/500 ms backoff denemesi
+- Kısmi stream'i temizleyen `orchestration_retrying` olayı ve hata sınıfı/düğüm provenance bilgisi
+- SQLite v12 → v13 migration; `attempt`, `parent_run_id`, `resumed_from_node` ve hata sınıflandırması
+- Yeni run satırıyla aynı kalıcı LangGraph thread checkpoint'inden kullanıcı tetiklemeli devam
+- Deneme başına ayrı ve kök aile genelinde kümülatif model çağrısı/token maliyeti görünümü
+- Araçtan hemen önce kalıcı `executing`, kanonik args SHA-256 ve yazma hedef SHA-256 kaydı
+- Çöküşte terminali `uncertain` duruma alan, yeniden çalıştırmadan devam/iptal isteyen akış
+- Hedef hash'i eşleşen atomik yazmayı tamamlanmış kabul edip ikinci yazmayı engelleme
+- Süreç yeniden başlatma, aynı düğüm devamı, kalıcı/geçici hata ve araç kurtarma regresyonları
+- 110 Python, 14 JavaScript sözleşme ve 2 etkin Rust testi geçti

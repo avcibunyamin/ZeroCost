@@ -459,6 +459,16 @@ class OrchestrationApprovalRequest(RequestBase):
     params: OrchestrationApprovalInput
 
 
+class OrchestrationRetryInput(Model):
+    run_id: Identifier
+    new_run_id: Identifier
+
+
+class OrchestrationRetryRequest(RequestBase):
+    method: Literal["orchestration.retry"]
+    params: OrchestrationRetryInput
+
+
 class OrchestrationHistoryRequest(RequestBase):
     method: Literal["orchestration.history"]
 
@@ -642,7 +652,9 @@ class ToolAction(Model):
     limit: int = Field(default=5, ge=1, le=10)
     preview: str = ""
     risk: Literal["medium", "high"]
-    status: Literal["waiting", "approved", "rejected", "completed", "failed"]
+    status: Literal["waiting", "approved", "executing", "uncertain", "rejected", "completed", "failed"]
+    args_hash: str = ""
+    content_hash: str = ""
     result: str = ""
 
 
@@ -668,6 +680,13 @@ class OrchestrationRun(Model):
     knowledge_collection_ids: list[str]
     workflow_id: str | None
     workflow_version: str | None
+    attempt: int
+    parent_run_id: str | None
+    resumed_from_node: str
+    failed_node: str
+    error_class: Literal["", "retryable", "permanent", "uncertain_tool"]
+    cumulative_model_calls: int
+    cumulative_cost_microusd: int
     tool_action: ToolAction | None
     status: OrchestrationStatus
     error: str
@@ -715,6 +734,8 @@ class OrchestrationError(Model):
     run_id: str
     sequence: int
     message: str
+    error_class: Literal["retryable", "permanent"] = "permanent"
+    failed_node: str = ""
     is_final: Literal[True] = True
 
 
@@ -772,11 +793,24 @@ class OrchestrationToolResult(Model):
     is_final: Literal[False] = False
 
 
+class OrchestrationRetrying(Model):
+    protocol_version: Literal[1] = 1
+    type: Literal["orchestration_retrying"] = "orchestration_retrying"
+    run_id: str
+    sequence: int
+    agent_id: str
+    phase: OrchestrationPhase
+    attempt: int = Field(ge=2, le=3)
+    message: str
+    is_final: Literal[False] = False
+
+
 Request = Annotated[Union[SnapshotRequest, ConnectionRequest, AgentRequest, WorkspaceRequest,
                          AgentPermissionsRequest, WorkspaceListRequest, WorkspaceReadRequest,
                          ModelsRequest, ChatStartRequest, CancelRequest, HistoryRequest, VaultRequest,
                          OrchestrationStartRequest, OrchestrationCancelRequest,
-                         OrchestrationApprovalRequest, OrchestrationHistoryRequest,
+                         OrchestrationApprovalRequest, OrchestrationRetryRequest,
+                         OrchestrationHistoryRequest,
                          PricingCatalogRequest, SkillCreateRequest, SkillAssignRequest,
                          SkillUnassignRequest, WorkflowCreateRequest, WorkflowArchiveRequest,
                          KnowledgeSnapshotRequest,
@@ -804,4 +838,5 @@ class Contract(Model):
     event: Union[StreamEvent, OrchestrationChunk, OrchestrationMessageEnd,
                  OrchestrationEnd, OrchestrationError, OrchestrationRoute,
                  OrchestrationApprovalRequired, OrchestrationUsage,
-                 OrchestrationToolResult, KnowledgeIngestionProgress]
+                 OrchestrationToolResult, OrchestrationRetrying,
+                 KnowledgeIngestionProgress]

@@ -4,7 +4,8 @@ import logging
 from anthropic import AsyncAnthropic
 from google import genai
 from google.genai import types
-from .base import ProviderAdapter, ProviderError
+from .base import (PermanentProviderError, ProviderAdapter, ProviderError,
+                   RetryableProviderError, provider_exception)
 from ..pricing import TokenUsage
 
 # SDK debug logging may include HTTP headers; it must never be enabled in the sidecar.
@@ -19,7 +20,7 @@ def split_messages(messages):
 
 def require_key(api_key):
     if not api_key:
-        raise ProviderError('Bu bağlantıya Model bağlantıları ekranından API anahtarı ekleyin.')
+        raise PermanentProviderError('Bu bağlantıya Model bağlantıları ekranından API anahtarı ekleyin.')
     return api_key.get_secret_value()
 
 
@@ -50,11 +51,13 @@ class AnthropicProvider(ProviderAdapter):
                         self.usage = TokenUsage(final.usage.input_tokens,
                                                 final.usage.output_tokens)
                         if not ended or final.stop_reason != 'end_turn':
-                            raise ProviderError('Claude yanıtı sınır veya sağlayıcı kararı nedeniyle tamamlanamadı.')
+                            raise PermanentProviderError('Claude yanıtı sınır veya sağlayıcı kararı nedeniyle tamamlanamadı.')
         except ProviderError:
             raise
-        except Exception:
-            raise ProviderError('Claude isteği başarısız. API anahtarını, model erişimini ve kotayı kontrol edin.') from None
+        except Exception as exc:
+            raise provider_exception(
+                'Claude isteği başarısız. API anahtarını, model erişimini ve kotayı kontrol edin.',
+                exc) from None
 
 
 class GeminiProvider(ProviderAdapter):
@@ -95,16 +98,18 @@ class GeminiProvider(ProviderAdapter):
                                     yield part.text
                         if candidate.finish_reason:
                             if candidate.finish_reason != types.FinishReason.STOP:
-                                raise ProviderError('Gemini yanıtı sınır veya sağlayıcı kararı nedeniyle tamamlanamadı.')
+                                raise PermanentProviderError('Gemini yanıtı sınır veya sağlayıcı kararı nedeniyle tamamlanamadı.')
                             finished = True
                     if chunk.prompt_feedback and chunk.prompt_feedback.block_reason:
-                        raise ProviderError('Gemini isteği sağlayıcı tarafından engellendi.')
+                        raise PermanentProviderError('Gemini isteği sağlayıcı tarafından engellendi.')
             if not finished:
-                raise ProviderError('Gemini akışı tamamlanmadan bağlantı kapandı.')
+                raise RetryableProviderError('Gemini akışı tamamlanmadan bağlantı kapandı.')
         except ProviderError:
             raise
-        except Exception:
-            raise ProviderError('Gemini isteği başarısız. API anahtarını, model erişimini ve kotayı kontrol edin.') from None
+        except Exception as exc:
+            raise provider_exception(
+                'Gemini isteği başarısız. API anahtarını, model erişimini ve kotayı kontrol edin.',
+                exc) from None
         finally:
             if client is not None:
                 client.close()

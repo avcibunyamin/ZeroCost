@@ -1,7 +1,8 @@
 import json
 from typing import AsyncIterator
 import httpx
-from .base import Message, ProviderAdapter, ProviderError
+from .base import (Message, PermanentProviderError, ProviderAdapter, ProviderError,
+                   RetryableProviderError)
 from ..models import OllamaModel, OllamaModels
 from ..pricing import TokenUsage
 
@@ -50,9 +51,11 @@ class OllamaProvider(ProviderAdapter):
                     'stream': True, 'options': {'num_predict': max_tokens},
                 }) as response:
                     if response.status_code == 404:
-                        raise ProviderError('Model bulunamadı. Kurulu bir Ollama modeli seçin.')
+                        raise PermanentProviderError('Model bulunamadı. Kurulu bir Ollama modeli seçin.')
                     if response.status_code >= 300:
-                        raise ProviderError(f'Ollama isteği reddetti (HTTP {response.status_code}).')
+                        error = (RetryableProviderError if response.status_code == 429 or
+                                 response.status_code >= 500 else PermanentProviderError)
+                        raise error(f'Ollama isteği reddetti (HTTP {response.status_code}).')
                     # Bound each NDJSON frame, including a server that never emits a newline.
                     buffer = b''
                     async for chunk in response.aiter_bytes():
@@ -90,10 +93,10 @@ class OllamaProvider(ProviderAdapter):
                             self.usage = TokenUsage(int(data.get('prompt_eval_count', 0)),
                                                     int(data.get('eval_count', 0)))
                             return
-                    raise ProviderError('Ollama akışı tamamlanma işareti olmadan kapandı.')
+                    raise RetryableProviderError('Ollama akışı tamamlanma işareti olmadan kapandı.')
         except httpx.TimeoutException as exc:
-            raise ProviderError('Ollama yanıtı zaman aşımına uğradı.') from exc
+            raise RetryableProviderError('Ollama yanıtı zaman aşımına uğradı.') from exc
         except httpx.HTTPError as exc:
-            raise ProviderError('Ollama bağlantısı kurulamadı veya kesildi.') from exc
+            raise RetryableProviderError('Ollama bağlantısı kurulamadı veya kesildi.') from exc
         except (ValueError, TypeError, AttributeError) as exc:
-            raise ProviderError('Ollama geçersiz JSON yanıtı gönderdi.') from exc
+            raise PermanentProviderError('Ollama geçersiz JSON yanıtı gönderdi.') from exc

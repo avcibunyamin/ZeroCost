@@ -33,6 +33,8 @@ test("orchestration and workspace responses are closed", () => {
         price_catalog_version: "2026-09-09",
         workspace_id: null, context_paths: [], enabled_tools: [], knowledge_collection_ids: [],
         workflow_id: null, workflow_version: null,
+        attempt: 1, parent_run_id: null, resumed_from_node: "", failed_node: "",
+        error_class: "", cumulative_model_calls: 3, cumulative_cost_microusd: 0,
         tool_action: null,
         status: "completed", error: "", messages: [
           { sequence: 1, agent_id: "a", phase: "analysis", content: "view" },
@@ -122,6 +124,9 @@ test("orchestration stream attributes every chunk", () => {
   assert.equal(validateEvent({ protocol_version: 1, type: "orchestration_tool_result",
     run_id: "run", sequence: 3, tool: "workspace.write", status: "completed",
     result: "written", is_final: false }), true);
+  assert.equal(validateEvent({ protocol_version: 1, type: "orchestration_retrying",
+    run_id: "run", sequence: 4, agent_id: "a", phase: "analysis", attempt: 2,
+    message: "Geçici hata; yeniden deneniyor.", is_final: false }), true);
 });
 
 test("knowledge progress is correlated, bounded and closed", () => {

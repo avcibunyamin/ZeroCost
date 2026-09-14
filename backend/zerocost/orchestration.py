@@ -11,9 +11,10 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command, interrupt
 from .models import (OrchestrationApprovalRequired, OrchestrationChunk,
                      OrchestrationEnd, OrchestrationError, OrchestrationMessageEnd,
-                     OrchestrationToolResult, OrchestrationUsage)
+                     OrchestrationRetrying, OrchestrationToolResult, OrchestrationUsage)
 from .providers import get_provider
-from .providers.base import Message, ProviderError
+from .providers.base import (Message, PermanentProviderError, ProviderError,
+                             RetryableProviderError)
 from .workspace_tools import apply_write, prepare_write, read_file
 from .terminal_tools import execute_command, prepare_command
 from .pricing import TokenUsage, cost_microusd
@@ -117,34 +118,61 @@ class OrchestrationEngine:
         return skill_prompt(assigned_skills(self.store, agent))
 
     async def _generate(self, run_id: str, state: GraphState, agent_id: str, phase: str,
-                        credentials: dict[str, str], prompt: str):
+                        credentials: dict[str, str], prompt: str, node_name: str):
         agent, connection = self._agent_connection(agent_id)
-        provider = self.provider_factory(connection.provider, connection.model_id)
         system_content = f'Rol: {agent.role}\n{agent.instructions}'
         skill_block = self._skill_instructions(agent_id)
         if skill_block:
             system_content += f'\n\n{skill_block}'
         messages = [Message(role='system', content=system_content),
                     Message(role='user', content=prompt)]
-        content = ''
         sequence = max(state['event_sequence'], self.event_sequences.get(run_id, 0))
-        self.store.increment_model_calls(run_id)
+        provider = None
+        content = ''
+        for attempt in range(1, 4):
+            provider = self.provider_factory(connection.provider, connection.model_id)
+            content = ''
+            try:
+                self.store.increment_model_calls(run_id)
+            except ValueError as exc:
+                setattr(exc, 'failed_node', node_name)
+                raise
 
-        async def consume():
-            nonlocal content, sequence
-            key = credentials.get(connection.id)
-            stream = provider.stream_reply(
-                messages, api_key=SecretStr(key) if key else None,
-                max_tokens=state['max_output_tokens'])
-            async for token in stream:
-                if len(content) + len(token) > 128000:
-                    raise ProviderError('Ajan yanıtı uzunluk sınırına ulaştı.')
-                content += token
-                sequence += 1
-                self.event_sequences[run_id] = sequence
-                self.output(OrchestrationChunk(run_id=run_id, sequence=sequence,
-                                               agent_id=agent_id, phase=phase, token=token))
-        await asyncio.wait_for(consume(), timeout=180)
+            async def consume():
+                nonlocal content, sequence
+                key = credentials.get(connection.id)
+                stream = provider.stream_reply(
+                    messages, api_key=SecretStr(key) if key else None,
+                    max_tokens=state['max_output_tokens'])
+                async for token in stream:
+                    if len(content) + len(token) > 128000:
+                        raise PermanentProviderError('Ajan yanıtı uzunluk sınırına ulaştı.')
+                    content += token
+                    sequence += 1
+                    self.event_sequences[run_id] = sequence
+                    self.output(OrchestrationChunk(run_id=run_id, sequence=sequence,
+                                                   agent_id=agent_id, phase=phase, token=token))
+            try:
+                await asyncio.wait_for(consume(), timeout=180)
+                break
+            except asyncio.TimeoutError:
+                error = RetryableProviderError('Model yanıtı zaman aşımına uğradı.')
+            except RetryableProviderError as exc:
+                error = exc
+            except ProviderError as exc:
+                setattr(exc, 'failed_node', node_name)
+                raise
+            if attempt >= 3:
+                setattr(error, 'failed_node', node_name)
+                raise error
+            sequence += 1
+            self.event_sequences[run_id] = sequence
+            self.output(OrchestrationRetrying(
+                run_id=run_id, sequence=sequence, agent_id=agent_id, phase=phase,
+                attempt=attempt + 1,
+                message=f'Geçici sağlayıcı hatası; {attempt + 1}. deneme başlatılıyor.'))
+            await asyncio.sleep(0.25 * (2 ** (attempt - 1)))
+        assert provider is not None
         sequence += 1
         self.event_sequences[run_id] = sequence
         message_sequence = len(state['transcript']) + 1
@@ -212,7 +240,8 @@ class OrchestrationEngine:
                                value['command'], value.get('cwd', ''))
 
     async def run(self, params, credentials: dict[str, str], *, resume: str | None = None,
-                  initial_sequence: int = 0):
+                  initial_sequence: int = 0, checkpoint_thread_id: str | None = None,
+                  continue_checkpoint: bool = False):
         run_id = params.run_id
         self.event_sequences[run_id] = initial_sequence
         try:
@@ -234,8 +263,9 @@ class OrchestrationEngine:
                           f"Tamamlanmış ekip görüşleri:\n{self._transcript(state)}\n\n"
                           "Kendi uzmanlık rolünle bağımsız, somut bir değerlendirme yap. "
                           "Önceki görüşlerde hata veya eksik varsa açıkça belirt.")
-                content, sequence = await self._generate(run_id, state, agent_id, phase,
-                                                         credentials, prompt)
+                node_name = f'deliberate:{state["current_round"]}:{state["current_index"]}'
+                content, sequence = await self._generate(
+                    run_id, state, agent_id, phase, credentials, prompt, node_name)
                 index = state['current_index'] + 1
                 round_index = state['current_round']
                 if index >= len(state['agent_ids']):
@@ -275,8 +305,8 @@ class OrchestrationEngine:
                                '{"tool":"terminal.execute","command":["git","status"],"cwd":""}. '
                                f"Bu görevde izinli araçlar: {state['enabled_tools']}. "
                                "İşlemin yapıldığını iddia etme; kullanıcı onayı beklenecek.")
-                content, sequence = await self._generate(run_id, state, agent_id, 'synthesis',
-                                                         credentials, prompt)
+                content, sequence = await self._generate(
+                    run_id, state, agent_id, 'synthesis', credentials, prompt, 'synthesize')
                 return {'transcript': state['transcript'] + [{
                             'agent_id': agent_id, 'agent_name': agent.name,
                             'phase': 'synthesis', 'content': content}],
@@ -308,9 +338,17 @@ class OrchestrationEngine:
                         result = format_search_context(search)
                         self.store.set_tool_action(run_id, proposal, 'completed', result)
                     else:
-                        result = (apply_write(self.store, proposal)
-                                  if proposal['tool'] == 'workspace.write'
-                                  else await execute_command(self.store, proposal))
+                        persisted = self.store.tool_status(run_id)
+                        if persisted and persisted['tool_status'] == 'completed':
+                            return {'tool_result': persisted['tool_result']}
+                        if persisted and persisted['tool_status'] == 'uncertain':
+                            result = ('Araç önceki süreçte çalışmış olabilir; kullanıcı yeniden '
+                                      'çalıştırmadan devam etmeyi seçti. Sonuç çıktısı mevcut değil.')
+                        else:
+                            self.store.update_tool_action(run_id, 'executing')
+                            result = (apply_write(self.store, proposal)
+                                      if proposal['tool'] == 'workspace.write'
+                                      else await execute_command(self.store, proposal))
                     self.store.update_tool_action(run_id, 'completed', result)
                     status = 'completed'
                 except (ValueError, ProviderError, asyncio.TimeoutError) as exc:
@@ -337,7 +375,8 @@ class OrchestrationEngine:
                           "Kaynak yollarını ve satır aralıklarını kullanarak nihai, tek başına anlaşılır "
                           "yanıtı üret. Yalnız kanıtlanan iddiaları belgelere dayandır.")
                 content, sequence = await self._generate(
-                    run_id, state, agent_id, 'synthesis', credentials, prompt)
+                    run_id, state, agent_id, 'synthesis', credentials, prompt,
+                    'ground_synthesis')
                 return {'transcript': state['transcript'] + [{
                             'agent_id': agent_id, 'agent_name': agent.name,
                             'phase': 'synthesis', 'content': content}],
@@ -388,8 +427,9 @@ class OrchestrationEngine:
             async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
                 await saver.setup()
                 graph = builder.compile(checkpointer=saver)
-                config = {'configurable': {'thread_id': run_id}}
-                invocation = Command(resume={'decision': resume}) if resume else {
+                config = {'configurable': {'thread_id': checkpoint_thread_id or run_id}}
+                invocation = (None if continue_checkpoint else
+                              Command(resume={'decision': resume}) if resume else {
                     'objective': params.objective, 'agent_ids': params.agent_ids,
                     'rounds': params.rounds, 'max_output_tokens': params.max_output_tokens,
                     'max_cost_microusd': params.max_cost_microusd,
@@ -398,7 +438,7 @@ class OrchestrationEngine:
                     'context_paths': params.context_paths, 'enabled_tools': params.enabled_tools,
                     'knowledge_collection_ids': params.knowledge_collection_ids,
                     'context_approved': None, 'pending_tool': None, 'tool_approved': None,
-                    'tool_result': ''}
+                    'tool_result': ''})
                 final = await graph.ainvoke(invocation, config)
 
             if '__interrupt__' in final:
@@ -433,9 +473,13 @@ class OrchestrationEngine:
             self.output(OrchestrationEnd(run_id=run_id, sequence=sequence, status='cancelled'))
         except Exception as exc:
             message = str(exc) if isinstance(exc, (ProviderError, ValueError)) else 'Çoklu ajan görevi tamamlanamadı.'
-            self.store.finish_orchestration(run_id, 'failed', message)
+            error_class = 'retryable' if isinstance(exc, RetryableProviderError) else 'permanent'
+            failed_node = getattr(exc, 'failed_node', '')
+            self.store.finish_orchestration(
+                run_id, 'failed', message, error_class, failed_node)
             self.output(OrchestrationError(run_id=run_id,
                                            sequence=self.event_sequences.get(run_id, 0) + 1,
-                                           message=message))
+                                           message=message, error_class=error_class,
+                                           failed_node=failed_node))
         finally:
             self.event_sequences.pop(run_id, None)

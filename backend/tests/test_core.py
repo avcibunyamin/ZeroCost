@@ -12,7 +12,8 @@ from zerocost.models import (AgentInput, ConnectionInput, WorkspaceInput,
                              WorkflowTemplateInput)
 from zerocost.sidecar import ChatService, dispatch
 from zerocost.storage import Store
-from zerocost.providers.base import Message, ProviderError
+from zerocost.providers.base import (Message, PermanentProviderError, ProviderError,
+                                     RetryableProviderError)
 from zerocost.pricing import TokenUsage
 from zerocost.workspace_tools import apply_write, prepare_write
 from zerocost.terminal_tools import execute_command, prepare_command
@@ -183,7 +184,7 @@ def test_v4_orchestration_migrates_with_budget_defaults(tmp_path):
 
     migrated = Store(path)
     run = migrated.orchestration_history().runs[0]
-    assert migrated.snapshot().database_version == 12
+    assert migrated.snapshot().database_version == 13
     assert run.routing_mode == 'manual' and run.max_model_calls == 5
     assert run.agent_ids == [a.id for a in agents]
     assert migrated.db.execute('PRAGMA foreign_key_check').fetchall() == []
@@ -331,6 +332,10 @@ def test_v8_knowledge_data_migrates_to_versioned_hash_cache(tmp_path):
     store.db.execute('DROP TABLE skills')
     store.db.execute('DROP TABLE workflows')
     store.db.execute('DROP INDEX orchestration_workflow')
+    store.db.execute('DROP INDEX orchestration_parent')
+    for column in ('attempt', 'parent_run_id', 'resumed_from_node', 'failed_node',
+                   'error_class', 'tool_args_hash', 'tool_content_hash'):
+        store.db.execute(f'ALTER TABLE orchestration_runs DROP COLUMN {column}')
     store.db.execute('ALTER TABLE orchestration_runs DROP COLUMN workflow_id')
     store.db.execute('ALTER TABLE orchestration_runs DROP COLUMN workflow_version')
     store.db.execute('PRAGMA user_version=8')
@@ -339,7 +344,7 @@ def test_v8_knowledge_data_migrates_to_versioned_hash_cache(tmp_path):
 
     migrated = Store(path)
     source = migrated.knowledge_source_hash(collection_id, workspace.id, 'legacy.md')
-    assert migrated.snapshot().database_version == 12
+    assert migrated.snapshot().database_version == 13
     assert source == {'content_hash': 'old-hash', 'status': 'ready', 'index_version': 'legacy-v8'}
     assert migrated.search_knowledge_fts(collection_id, 'korunan')[0]['content'] == 'korunan içerik'
     assert migrated.db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
@@ -438,6 +443,8 @@ class FakeProvider:
                 await self.gate.wait()
             yield token
         if self.failure:
+            if isinstance(self.failure, Exception):
+                raise self.failure
             raise ProviderError(self.failure)
 
 
@@ -794,6 +801,108 @@ def test_langgraph_multi_agent_round_is_attributed_and_persisted(tmp_path):
     asyncio.run(scenario())
 
 
+def test_transient_provider_failure_retries_inside_same_node(tmp_path):
+    async def scenario():
+        store = Store(tmp_path / 'retry.sqlite3')
+        store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+        connection = store.snapshot().connections[0]
+        for name in ('A', 'B'):
+            store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+        calls = 0
+        def factory(*_):
+            nonlocal calls
+            calls += 1
+            return FakeProvider(
+                tokens=(), failure=RetryableProviderError('geçici hata')) if calls <= 2 else FakeProvider(tokens=('ok',))
+        events = []
+        service = ChatService(store, events.append, factory)
+        started = await service.handle(request(
+            'orchestration.start', run_id='auto-retry', objective='İncele',
+            agent_ids=[a.id for a in store.snapshot().agents], rounds=1,
+            max_model_calls=8))
+        assert started.ok
+        await service.tasks['auto-retry']
+        run = store.orchestration_history().runs[0]
+        assert run.status == 'completed' and run.used_model_calls == 5
+        assert [event.type for event in events].count('orchestration_retrying') == 2
+        assert len(run.messages) == 3
+        store.close()
+    asyncio.run(scenario())
+
+
+def test_failed_node_can_resume_as_new_run_from_persistent_checkpoint(tmp_path):
+    async def scenario():
+        path = tmp_path / 'durable-retry.sqlite3'
+        store = Store(path)
+        store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+        connection = store.snapshot().connections[0]
+        for name in ('A', 'B'):
+            store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+        agents = store.snapshot().agents
+        initial_calls = 0
+        def failing_second_node(*_):
+            nonlocal initial_calls
+            initial_calls += 1
+            return (FakeProvider(tokens=('first',)) if initial_calls == 1 else
+                    FakeProvider(tokens=(), failure=RetryableProviderError('geçici hata')))
+        service = ChatService(store, lambda _: None, failing_second_node)
+        started = await service.handle(request(
+            'orchestration.start', run_id='root-attempt', objective='İncele',
+            agent_ids=[a.id for a in agents], rounds=1, max_model_calls=14))
+        assert started.ok
+        await service.tasks['root-attempt']
+        failed = store.orchestration_history().runs[0]
+        assert failed.status == 'failed' and failed.error_class == 'retryable'
+        assert failed.failed_node == 'deliberate:0:1' and failed.used_model_calls == 4
+        assert len(failed.messages) == 1 and failed.messages[0].content == 'first'
+        await service.close()
+        store.close()
+
+        reopened = Store(path)
+        restarted = ChatService(reopened, lambda _: None, lambda *_: FakeProvider(tokens=('ok',)))
+        accepted = await restarted.handle(request(
+            'orchestration.retry', run_id='root-attempt', new_run_id='second-attempt'))
+        assert accepted.ok
+        await restarted.tasks['second-attempt']
+        runs = {run.run_id: run for run in reopened.orchestration_history().runs}
+        retry = runs['second-attempt']
+        assert retry.status == 'completed' and retry.parent_run_id == 'root-attempt'
+        assert retry.attempt == 2 and retry.resumed_from_node == 'deliberate:0:1'
+        assert retry.used_model_calls == 2 and retry.cumulative_model_calls == 6
+        assert len(retry.messages) == 2
+        assert sum(len(run.messages) for run in runs.values()) == 3
+        assert (tmp_path / 'durable-retry-checkpoints.sqlite3').exists()
+        await restarted.close()
+        reopened.close()
+    asyncio.run(scenario())
+
+
+def test_permanent_provider_failure_is_not_retried(tmp_path):
+    async def scenario():
+        store = Store(tmp_path / 'permanent.sqlite3')
+        store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+        connection = store.snapshot().connections[0]
+        for name in ('A', 'B'):
+            store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+        calls = 0
+        def factory(*_):
+            nonlocal calls
+            calls += 1
+            return FakeProvider(tokens=(), failure=PermanentProviderError('kalıcı hata'))
+        service = ChatService(store, lambda _: None, factory)
+        started = await service.handle(request(
+            'orchestration.start', run_id='permanent', objective='İncele',
+            agent_ids=[a.id for a in store.snapshot().agents], rounds=1,
+            max_model_calls=8))
+        assert started.ok
+        await service.tasks['permanent']
+        run = store.orchestration_history().runs[0]
+        assert run.status == 'failed' and run.error_class == 'permanent'
+        assert calls == 1 and run.used_model_calls == 1
+        store.close()
+    asyncio.run(scenario())
+
+
 def test_agent_knowledge_search_is_read_only_and_grounded_without_approval(tmp_path):
     class SearchEmbeddings:
         def __init__(self, model=''):
@@ -946,6 +1055,135 @@ def test_workspace_approval_rejection_makes_no_model_call(tmp_path):
         assert provider.messages == []
         assert events[-1].type == 'orchestration_end'
         store.close()
+    asyncio.run(scenario())
+
+
+def test_recovery_preserves_tool_hashes_and_detects_applied_write(tmp_path):
+    root = tmp_path / 'project'
+    root.mkdir()
+    target = root / 'result.txt'
+    target.write_text('before', encoding='utf-8')
+    store = Store(tmp_path / 'tool-recovery.sqlite3')
+    store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+    connection = store.snapshot().connections[0]
+    for name in ('A', 'B'):
+        store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+    agents = store.snapshot().agents
+    store.set_agent_permissions(agents[0].id, ['workspace.read', 'workspace.write'])
+    store.create_workspace(WorkspaceInput(name='Project', path=str(root)))
+    workspace = store.snapshot().workspaces[0]
+    store.start_orchestration(
+        'write-crash', 'Write', 1, [agent.id for agent in agents],
+        workspace_id=workspace.id, enabled_tools=['workspace.write'])
+    proposal = prepare_write(store, agents[0].id, workspace.id, 'result.txt', 'after')
+    store.set_tool_action('write-crash', proposal, 'executing')
+    apply_write(store, proposal)
+    before = store.orchestration_history().runs[0].tool_action
+    assert len(before.args_hash) == 64 and len(before.content_hash) == 64
+
+    store.recover_runs()
+    recovered = store.orchestration_history().runs[0]
+    assert recovered.status == 'waiting_approval'
+    assert recovered.error_class == 'uncertain_tool'
+    assert recovered.tool_action.status == 'completed'
+    assert 'hash ile doğrulandı' in recovered.tool_action.result
+    assert target.read_text(encoding='utf-8') == 'after'
+    store.close()
+
+
+def test_recovery_marks_executing_terminal_uncertain_with_concrete_request(tmp_path):
+    root = tmp_path / 'project'
+    root.mkdir()
+    store = Store(tmp_path / 'terminal-recovery.sqlite3')
+    store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+    connection = store.snapshot().connections[0]
+    for name in ('A', 'B'):
+        store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+    agents = store.snapshot().agents
+    store.set_agent_permissions(agents[0].id, ['terminal.execute'])
+    store.create_workspace(WorkspaceInput(name='Project', path=str(root)))
+    workspace = store.snapshot().workspaces[0]
+    store.start_orchestration(
+        'terminal-crash', 'Test', 1, [agent.id for agent in agents],
+        workspace_id=workspace.id, enabled_tools=['terminal.execute'])
+    proposal = prepare_command(store, agents[0].id, workspace.id, ['npm', 'test'])
+    store.set_tool_action('terminal-crash', proposal, 'executing')
+    store.recover_runs()
+    recovered = store.orchestration_history().runs[0]
+    assert recovered.status == 'waiting_approval' and recovered.error_class == 'uncertain_tool'
+    assert recovered.tool_action.status == 'uncertain'
+    assert recovered.tool_action.command == ['npm', 'test']
+    assert len(recovered.tool_action.args_hash) == 64
+    store.close()
+
+
+def test_uncertain_terminal_continues_checkpoint_without_reexecution(tmp_path, monkeypatch):
+    import zerocost.orchestration as orchestration_module
+
+    class SimulatedProcessCrash(BaseException):
+        pass
+
+    executions = 0
+    async def crash_after_execution_started(_store, _proposal):
+        nonlocal executions
+        executions += 1
+        raise SimulatedProcessCrash()
+    monkeypatch.setattr(orchestration_module, 'execute_command', crash_after_execution_started)
+
+    async def scenario():
+        root = tmp_path / 'project'
+        root.mkdir()
+        path = tmp_path / 'uncertain-checkpoint.sqlite3'
+        store = Store(path)
+        store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+        connection = store.snapshot().connections[0]
+        for name in ('A', 'B'):
+            store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+        agents = store.snapshot().agents
+        store.set_agent_permissions(agents[0].id, ['terminal.execute'])
+        store.create_workspace(WorkspaceInput(name='Project', path=str(root)))
+        workspace = store.snapshot().workspaces[0]
+        replies = iter(('first', 'second',
+            'run tests\n```zerocost-tool\n{"tool":"terminal.execute","command":["npm","test"]}\n```'))
+        service = ChatService(store, lambda _: None,
+                              lambda *_: FakeProvider(tokens=(next(replies),)))
+        started = await service.handle(request(
+            'orchestration.start', run_id='uncertain-run', objective='Test',
+            agent_ids=[agent.id for agent in agents], rounds=1, max_model_calls=3,
+            workspace_id=workspace.id, enabled_tools=['terminal.execute']))
+        assert started.ok
+        await service.tasks['uncertain-run']
+        assert store.orchestration_history().runs[0].status == 'waiting_approval'
+        approved = await service.handle(request(
+            'orchestration.approve', run_id='uncertain-run', decision='approve'))
+        assert approved.ok
+        try:
+            await service.tasks['uncertain-run']
+        except SimulatedProcessCrash:
+            pass
+        assert executions == 1
+        assert store.orchestration_spec('uncertain-run')['tool_status'] == 'executing'
+        store.close()
+
+        reopened = Store(path)
+        reopened.recover_runs()
+        recovered = reopened.orchestration_history().runs[0]
+        assert recovered.status == 'waiting_approval'
+        assert recovered.tool_action.status == 'uncertain'
+        assert recovered.tool_action.command == ['npm', 'test']
+        restarted = ChatService(reopened, lambda _: None, lambda *_: FakeProvider())
+        continued = await restarted.handle(request(
+            'orchestration.approve', run_id='uncertain-run', decision='approve'))
+        assert continued.ok
+        await restarted.tasks['uncertain-run']
+        final = reopened.orchestration_history().runs[0]
+        assert final.status == 'completed'
+        assert final.tool_action.status == 'completed'
+        assert 'yeniden çalıştırmadan' in final.tool_action.result
+        assert executions == 1
+        await restarted.close()
+        reopened.close()
+
     asyncio.run(scenario())
 
 

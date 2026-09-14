@@ -32,6 +32,7 @@ Windows'ta Python komutu `.venv\Scripts\python.exe` olur. Node yardımcı betikl
 - Ollama model keşfi; yalnızca metin üretebilen kurulu modellerin gösterilmesi.
 - Sıralı ve çalışma zamanı doğrulamalı akış olaylarıyla yerel sohbet, iptal ve kalıcı geçmiş.
 - LangGraph tabanlı 2–4 ajan tartışması, 1–3 tur karşı görüş ve koordinatör sentezi.
+- Geçici sağlayıcı hatalarında sınırlı backoff ve kalıcı checkpoint'ten kullanıcı tetiklemeli düğüm devamı.
 - Ajan/aşama kimlikli canlı görev olayları, SQLite görev geçmişi ve LangGraph SQLite checkpoint'leri.
 - Ajan bazında `workspace.read` izni; sınırlandırılmış klasör listeleme ve UTF-8 metin okuma araçları.
 - Kullanıcının seçtiği en fazla 10 çalışma alanı dosyasını çoklu ajan bağlamına ekleme.
@@ -117,6 +118,14 @@ Tarifte string interpolation veya placeholder değerlendirmesi yapılmaz. En faz
 
 Aynı adla yeni sürüm oluşturmak önceki sürümleri silmeden arşivler. Arşivli sürüm yeni görev başlatamaz; geçmiş görev ve bekleyen checkpoint provenance kaydını korur. Onay bekleyen mevcut görev tarif sonradan arşivlense de sürdürülebilir, fakat slot skill ataması bu sırada kaldırılırsa onay kapalı davranışla reddedilir. SQLite şema v12, `workflows` tablosu ile `orchestration_runs.workflow_id/workflow_version` alanlarını ekler. `workflow.create` ve `workflow.archive` komutları kapalı Pydantic → TypeScript sözleşmesinden geçer. Kararın kapsamı ve ertelenen graph/plugin işleri [ADR-0002](docs/adr/0002-fixed-workflow-recipes.md) içinde kayıtlıdır.
 
+## Dayanıklı görev devamı
+
+Provider katmanı geçici ve kalıcı hataları ayrı tiplerle sınıflandırır. Timeout, bağlantı kesintisi, HTTP 429 ve 5xx hataları aynı LLM düğümünde 250/500 ms backoff ile en fazla üç kez denenir; kimlik doğrulama, bulunamayan model, güvenlik/çıktı sınırı ve geçersiz protokol hataları otomatik tekrarlanmaz. Her sağlayıcı girişimi model çağrısı bütçesinden düşer. Kısmi stream yeniden başlatılırken UI eski parçayı temizler; başarısız isteğin sağlayıcıda ücretlenmiş olabileceği kabul edilir.
+
+Üç deneme sonunda geçici hata sürerse görev `retryable` olarak ve başarısız düğüm adıyla kapanır. Kullanıcı **Başarısız düğümü yeniden dene** dediğinde yeni bir run satırı oluşturulur; `parent_run_id`, artan `attempt` ve `resumed_from_node` ile kök denemeye bağlanır. Yeni çalışma aynı kalıcı LangGraph `thread_id` checkpoint'ini açar ve yalnız tamamlanmamış düğümü yürütür. Önceki görüşler tekrar üretilmez. UI deneme zincirinin mesajlarını birlikte gösterir; model çağrısı ve bilinen token maliyeti bütün aile üzerinden hesaplanır. Workflow, agent, skill, izin ve kimlik bilgileri devam öncesinde yeniden doğrulanır.
+
+Mutasyon aracı yürütülmeden hemen önce `executing` durumu, doğrulanmış parametre özeti, kanonik args SHA-256 ve `workspace.write` hedef içerik SHA-256 değeri kalıcı olarak yazılır. Bu sırada süreç kesilirse terminal çağrısı `uncertain` olur ve otomatik tekrarlanmaz; UI tam argv/önizlemeyi göstererek kullanıcıdan yeniden çalıştırmadan devam etme veya görevi durdurma kararı ister. Yazma hedefinin mevcut hash'i beklenen içerik hash'iyle eşleşirse işlem tamamlanmış kabul edilir ve yeniden uygulanmaz; farklı hash güvenli biçimde belirsiz kalır. Tasarım kararı [ADR-0003](docs/adr/0003-durable-node-retry.md) içinde kayıtlıdır.
+
 ## Pydantic → TypeScript sözleşmesi
 
 Tek kaynak `backend/zerocost/models.py` dosyasıdır.
@@ -130,7 +139,7 @@ npm run schema:check
 
 Çoklu ajan görevleri manuel veya deterministik otomatik routing kullanır. Router kararı ve gerekçesi görev kaydında tutulur. Çağrı bütçesi, görev başlamadan önce gerekli model çağrılarını sınırlar; çıktı bütçesi her sağlayıcı isteğine doğrudan uygulanır. Çalışma alanı dosyaları seçildiyse LangGraph görevi `waiting_approval` checkpoint'inde durur. İçerik ancak kullanıcı somut dosya listesini onayladıktan sonra okunur; ret halinde hiçbir model çağrısı yapılmaz.
 
-Protokol v1 yapılandırma komutlarına ek olarak sohbet, kasa, workspace okuma, `pricing.catalog`, `skill.create/assign/unassign`, `workflow.create/archive`, `knowledge.snapshot`, `knowledge.collection.create` ve `orchestration.start/approve/cancel/history` komutlarını sunar. Her komut `request_id` ve `protocol_version` içerir. Akış parçaları `run_id`, monoton `sequence`, olay türü, ajan/aşama kimliği ve terminal işareti taşır. Yanıtlar ile akış olayları Pydantic'ten üretilen ayrı çalışma zamanı doğrulayıcılarından geçer.
+Protokol v1 yapılandırma komutlarına ek olarak sohbet, kasa, workspace okuma, `pricing.catalog`, `skill.create/assign/unassign`, `workflow.create/archive`, `knowledge.snapshot`, `knowledge.collection.create` ve `orchestration.start/approve/retry/cancel/history` komutlarını sunar. Her komut `request_id` ve `protocol_version` içerir. Akış parçaları `run_id`, monoton `sequence`, olay türü, ajan/aşama kimliği ve terminal işareti taşır. Yanıtlar ile akış olayları Pydantic'ten üretilen ayrı çalışma zamanı doğrulayıcılarından geçer.
 
 ## Veri ve süreç yaşam döngüsü
 
@@ -166,6 +175,7 @@ macOS uygulaması `src-tauri/target/release/bundle/macos/ZeroCost.app` altında 
 ## Sonraki geliştirme dilimi
 
 1. Workflow tarifleri için çalıştırma geçmişi filtresi, kopyalama ve açık sürüm karşılaştırması.
-2. Kesilmiş üretim düğümünü kontrollü yeniden deneme ve kısmi görev devamı.
-3. Ayrı bir dilimde görsel graph editörü ve topoloji doğrulaması.
-4. Üçüncü taraf plugin manifesti, imza doğrulaması ve sandbox sınırı.
+2. Sağlayıcı fallback zinciri ve kullanıcı onaylı model değişimi.
+3. Task queue, worker pool ve stream backpressure.
+4. Ayrı bir dilimde görsel graph editörü ve topoloji doğrulaması.
+5. Üçüncü taraf plugin manifesti, imza doğrulaması ve sandbox sınırı.
