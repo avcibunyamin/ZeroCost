@@ -1,9 +1,9 @@
 """Durable multi-agent graph with routing, budgets, and approval interrupts."""
 from __future__ import annotations
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import json
-from pathlib import Path
 import re
 import time
 from typing import TypedDict
@@ -24,6 +24,16 @@ from .pricing import TokenUsage, cost_microusd
 from .embeddings import OllamaEmbeddings
 from .knowledge_search import HybridKnowledgeSearch, format_search_context
 from .skills import assigned_skills, skill_prompt
+from .checkpoints import checkpoint_path
+
+
+@asynccontextmanager
+async def flush_before(flush):
+    """Flush buffered output before every exit or state transition."""
+    try:
+        yield
+    finally:
+        await flush()
 
 
 class GraphState(TypedDict):
@@ -55,6 +65,11 @@ class OrchestrationEngine:
         self.provider_factory = provider_factory
         self.knowledge_search = HybridKnowledgeSearch(store, embedding_factory)
         self.event_sequences: dict[str, int] = {}
+        self.connection_semaphores: dict[str, asyncio.Semaphore] = {}
+
+    def _record_sequence(self, run_id: str, sequence: int):
+        self.event_sequences[run_id] = sequence
+        self.store.set_event_sequence(run_id, sequence)
 
     def _agent_connection(self, agent_id: str):
         snapshot = self.store.snapshot()
@@ -148,7 +163,7 @@ class OrchestrationEngine:
             connection = candidate
             if connection_index:
                 sequence += 1
-                self.event_sequences[run_id] = sequence
+                self._record_sequence(run_id, sequence)
                 self.output(OrchestrationFallback(
                     run_id=run_id, sequence=sequence, agent_id=agent_id, phase=phase,
                     from_connection_id=chain[connection_index - 1].id,
@@ -179,21 +194,44 @@ class OrchestrationEngine:
             for attempt in range(1, 4):
                 if attempt > 1:
                     call_index += 1
-                provider = self.provider_factory(connection.provider, connection.model_id)
                 content = ''
-                started_at = datetime.now(timezone.utc).isoformat()
-                started = time.monotonic()
-                try:
-                    self.store.increment_model_calls(run_id)
-                except ValueError as exc:
-                    self.store.record_model_call(
-                        run_id, node_name, connection.id, call_index, 'budget_exceeded',
-                        str(exc), 0, 0, 0, started_at, 0)
-                    setattr(exc, 'failed_node', node_name)
-                    raise
+                pending_tokens: list[str] = []
+                pending_size = 0
+                flush_timer = None
+
+                async def flush_chunk():
+                    nonlocal sequence, pending_tokens, pending_size, flush_timer
+                    current = asyncio.current_task()
+                    timer = flush_timer
+                    flush_timer = None
+                    if timer is not None and timer is not current and not timer.done():
+                        timer.cancel()
+                    if not pending_tokens:
+                        return
+                    token = ''.join(pending_tokens)
+                    pending_tokens = []
+                    pending_size = 0
+                    sequence += 1
+                    self._record_sequence(run_id, sequence)
+                    self.output(OrchestrationChunk(
+                        run_id=run_id, sequence=sequence, agent_id=agent_id,
+                        phase=phase, token=token))
+
+                async def delayed_flush():
+                    await asyncio.sleep(0.025)
+                    await flush_chunk()
+
+                async def buffer_token(token):
+                    nonlocal pending_size, flush_timer
+                    pending_tokens.append(token)
+                    pending_size += len(token)
+                    if pending_size >= 256:
+                        await flush_chunk()
+                    elif flush_timer is None or flush_timer.done():
+                        flush_timer = asyncio.create_task(delayed_flush())
 
                 async def consume():
-                    nonlocal content, sequence
+                    nonlocal content
                     key = credentials.get(connection.id)
                     stream = provider.stream_reply(
                         messages, api_key=SecretStr(key) if key else None,
@@ -202,28 +240,40 @@ class OrchestrationEngine:
                         if len(content) + len(token) > 128000:
                             raise PermanentProviderError('Ajan yanıtı uzunluk sınırına ulaştı.')
                         content += token
-                        sequence += 1
-                        self.event_sequences[run_id] = sequence
-                        self.output(OrchestrationChunk(
-                            run_id=run_id, sequence=sequence, agent_id=agent_id,
-                            phase=phase, token=token))
+                        await buffer_token(token)
 
                 error = None
-                try:
-                    await asyncio.wait_for(consume(), timeout=180)
-                except asyncio.TimeoutError:
-                    error = RetryableProviderError('Model yanıtı zaman aşımına uğradı.')
-                except RetryableProviderError as exc:
-                    error = exc
-                except ProviderError as exc:
-                    usage = getattr(provider, 'usage', TokenUsage())
-                    cost = cost_microusd(connection.provider, connection.model_id, usage)
-                    self.store.record_model_call(
-                        run_id, node_name, connection.id, call_index, 'permanent', str(exc),
-                        usage.input_tokens, usage.output_tokens, cost, started_at,
-                        int((time.monotonic() - started) * 1000))
-                    setattr(exc, 'failed_node', node_name)
-                    raise
+                semaphore = self.connection_semaphores.setdefault(
+                    connection.id, asyncio.Semaphore(1))
+                async with semaphore:
+                    # Waiting for a connection slot consumes neither call nor cost budget.
+                    provider = self.provider_factory(connection.provider, connection.model_id)
+                    started_at = datetime.now(timezone.utc).isoformat()
+                    started = time.monotonic()
+                    try:
+                        self.store.increment_model_calls(run_id)
+                    except ValueError as exc:
+                        self.store.record_model_call(
+                            run_id, node_name, connection.id, call_index, 'budget_exceeded',
+                            str(exc), 0, 0, 0, started_at, 0)
+                        setattr(exc, 'failed_node', node_name)
+                        raise
+                    try:
+                        async with flush_before(flush_chunk):
+                            await asyncio.wait_for(consume(), timeout=180)
+                    except asyncio.TimeoutError:
+                        error = RetryableProviderError('Model yanıtı zaman aşımına uğradı.')
+                    except RetryableProviderError as exc:
+                        error = exc
+                    except ProviderError as exc:
+                        usage = getattr(provider, 'usage', TokenUsage())
+                        cost = cost_microusd(connection.provider, connection.model_id, usage)
+                        self.store.record_model_call(
+                            run_id, node_name, connection.id, call_index, 'permanent', str(exc),
+                            usage.input_tokens, usage.output_tokens, cost, started_at,
+                            int((time.monotonic() - started) * 1000))
+                        setattr(exc, 'failed_node', node_name)
+                        raise
 
                 usage = getattr(provider, 'usage', TokenUsage())
                 cost = cost_microusd(connection.provider, connection.model_id, usage)
@@ -245,7 +295,7 @@ class OrchestrationEngine:
                 if attempt >= 3:
                     break
                 sequence += 1
-                self.event_sequences[run_id] = sequence
+                self._record_sequence(run_id, sequence)
                 self.output(OrchestrationRetrying(
                     run_id=run_id, sequence=sequence, agent_id=agent_id, phase=phase,
                     attempt=attempt + 1,
@@ -265,7 +315,7 @@ class OrchestrationEngine:
             setattr(failure, 'failed_node', node_name)
             raise failure
         sequence += 1
-        self.event_sequences[run_id] = sequence
+        self._record_sequence(run_id, sequence)
         message_sequence = len(state['transcript']) + 1
         self.store.append_orchestration_message(run_id, message_sequence, agent_id, phase, content)
         self.output(OrchestrationMessageEnd(run_id=run_id, sequence=sequence, agent_id=agent_id,
@@ -274,7 +324,7 @@ class OrchestrationEngine:
         cost = cost_microusd(connection.provider, connection.model_id, usage)
         totals = usage_totals
         sequence += 1
-        self.event_sequences[run_id] = sequence
+        self._record_sequence(run_id, sequence)
         self.output(OrchestrationUsage(run_id=run_id, sequence=sequence, **totals))
         if totals['actual_cost_microusd'] > state['max_cost_microusd']:
             raise ProviderError('Gerçek kullanım görev maliyet bütçesini aştı; kalan çağrılar durduruldu.')
@@ -451,7 +501,7 @@ class OrchestrationEngine:
                     else:
                         self.store.update_tool_action(run_id, status, result)
                 sequence = max(state['event_sequence'], self.event_sequences.get(run_id, 0)) + 1
-                self.event_sequences[run_id] = sequence
+                self._record_sequence(run_id, sequence)
                 self.output(OrchestrationToolResult(run_id=run_id, sequence=sequence,
                     tool=proposal['tool'], status=status, result=result))
                 return {'event_sequence': sequence, 'tool_result': result}
@@ -514,8 +564,9 @@ class OrchestrationEngine:
             builder.add_conditional_edges('execute_tool', after_tool_execution,
                                           {'ground_synthesis': 'ground_synthesis', END: END})
             builder.add_edge('ground_synthesis', END)
-            checkpoint_path = Path(self.store.path).with_name(Path(self.store.path).stem + '-checkpoints.sqlite3')
-            async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
+            checkpoint_file = checkpoint_path(self.store.path, checkpoint_thread_id or run_id)
+            checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
+            async with AsyncSqliteSaver.from_conn_string(str(checkpoint_file)) as saver:
                 await saver.setup()
                 graph = builder.compile(checkpointer=saver)
                 config = {'configurable': {'thread_id': checkpoint_thread_id or run_id}}
@@ -536,8 +587,7 @@ class OrchestrationEngine:
             if '__interrupt__' in final:
                 value = final['__interrupt__'][0].value
                 sequence = self.event_sequences.get(run_id, 0) + 1
-                self.event_sequences[run_id] = sequence
-                self.store.set_event_sequence(run_id, sequence)
+                self._record_sequence(run_id, sequence)
                 self.store.set_orchestration_status(run_id, 'waiting_approval')
                 if value['permission'] in ('workspace.write', 'terminal.execute'):
                     proposal = final.get('pending_tool') or value
@@ -549,19 +599,23 @@ class OrchestrationEngine:
                     risk=value.get('risk')))
             elif final.get('context_approved') is False:
                 self.store.finish_orchestration(run_id, 'cancelled', 'Dosya okuma isteği reddedildi.')
+                sequence = max(final['event_sequence'], self.event_sequences.get(run_id, 0)) + 1
+                self._record_sequence(run_id, sequence)
                 self.output(OrchestrationEnd(run_id=run_id,
-                    sequence=max(final['event_sequence'], self.event_sequences.get(run_id, 0)) + 1,
+                    sequence=sequence,
                     status='cancelled'))
             else:
                 if final.get('pending_tool') and final.get('tool_approved') is False:
                     self.store.update_tool_action(run_id, 'rejected', 'Kullanıcı araç önerisini reddetti.')
                 self.store.finish_orchestration(run_id, 'completed')
-                self.output(OrchestrationEnd(run_id=run_id,
-                                             sequence=max(final['event_sequence'], self.event_sequences.get(run_id, 0)) + 1,
+                sequence = max(final['event_sequence'], self.event_sequences.get(run_id, 0)) + 1
+                self._record_sequence(run_id, sequence)
+                self.output(OrchestrationEnd(run_id=run_id, sequence=sequence,
                                              status='completed'))
         except asyncio.CancelledError:
             self.store.finish_orchestration(run_id, 'cancelled')
             sequence = self.event_sequences.get(run_id, 0) + 1
+            self._record_sequence(run_id, sequence)
             self.output(OrchestrationEnd(run_id=run_id, sequence=sequence, status='cancelled'))
         except Exception as exc:
             message = str(exc) if isinstance(exc, (ProviderError, ValueError)) else 'Çoklu ajan görevi tamamlanamadı.'
@@ -569,8 +623,10 @@ class OrchestrationEngine:
             failed_node = getattr(exc, 'failed_node', '')
             self.store.finish_orchestration(
                 run_id, 'failed', message, error_class, failed_node)
+            sequence = self.event_sequences.get(run_id, 0) + 1
+            self._record_sequence(run_id, sequence)
             self.output(OrchestrationError(run_id=run_id,
-                                           sequence=self.event_sequences.get(run_id, 0) + 1,
+                                           sequence=sequence,
                                            message=message, error_class=error_class,
                                            failed_node=failed_node))
         finally:

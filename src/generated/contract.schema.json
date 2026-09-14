@@ -1967,6 +1967,135 @@
       "title": "OrchestrationMessageEnd",
       "type": "object"
     },
+    "OrchestrationPaused": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "type": {
+          "const": "orchestration_paused",
+          "default": "orchestration_paused",
+          "title": "Type",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "is_final": {
+          "const": false,
+          "default": false,
+          "title": "Is Final",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "type",
+        "run_id",
+        "sequence",
+        "message",
+        "is_final"
+      ],
+      "title": "OrchestrationPaused",
+      "type": "object"
+    },
+    "OrchestrationQueueResumeRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "orchestration.queue.resume",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/RunInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "OrchestrationQueueResumeRequest",
+      "type": "object"
+    },
+    "OrchestrationQueued": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "type": {
+          "const": "orchestration_queued",
+          "default": "orchestration_queued",
+          "title": "Type",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "queue_position": {
+          "minimum": 1,
+          "title": "Queue Position",
+          "type": "integer"
+        },
+        "resumed": {
+          "default": false,
+          "title": "Resumed",
+          "type": "boolean"
+        },
+        "is_final": {
+          "const": false,
+          "default": false,
+          "title": "Is Final",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "type",
+        "run_id",
+        "sequence",
+        "queue_position",
+        "resumed",
+        "is_final"
+      ],
+      "title": "OrchestrationQueued",
+      "type": "object"
+    },
     "OrchestrationRetryInput": {
       "additionalProperties": false,
       "properties": {
@@ -2358,6 +2487,62 @@
           "title": "Model Call Attempts",
           "type": "array"
         },
+        "queue_sequence": {
+          "title": "Queue Sequence",
+          "type": "integer"
+        },
+        "queue_position": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Queue Position"
+        },
+        "worker_id": {
+          "title": "Worker Id",
+          "type": "string"
+        },
+        "queued_at": {
+          "title": "Queued At",
+          "type": "string"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Started At"
+        },
+        "resumed_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Resumed At"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Finished At"
+        },
         "tool_action": {
           "anyOf": [
             {
@@ -2370,7 +2555,9 @@
         },
         "status": {
           "enum": [
+            "queued",
             "running",
+            "paused",
             "waiting_approval",
             "completed",
             "cancelled",
@@ -2423,6 +2610,13 @@
         "cumulative_cost_microusd",
         "fallback_chain",
         "model_call_attempts",
+        "queue_sequence",
+        "queue_position",
+        "worker_id",
+        "queued_at",
+        "started_at",
+        "resumed_at",
+        "finished_at",
         "tool_action",
         "status",
         "error",
@@ -2619,6 +2813,51 @@
         "params"
       ],
       "title": "OrchestrationStartRequest",
+      "type": "object"
+    },
+    "OrchestrationStarted": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "type": {
+          "const": "orchestration_started",
+          "default": "orchestration_started",
+          "title": "Type",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "worker_id": {
+          "title": "Worker Id",
+          "type": "string"
+        },
+        "is_final": {
+          "const": false,
+          "default": false,
+          "title": "Is Final",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "type",
+        "run_id",
+        "sequence",
+        "worker_id",
+        "is_final"
+      ],
+      "title": "OrchestrationStarted",
       "type": "object"
     },
     "OrchestrationToolResult": {
@@ -4270,6 +4509,7 @@
           "orchestration.approve": "#/$defs/OrchestrationApprovalRequest",
           "orchestration.cancel": "#/$defs/OrchestrationCancelRequest",
           "orchestration.history": "#/$defs/OrchestrationHistoryRequest",
+          "orchestration.queue.resume": "#/$defs/OrchestrationQueueResumeRequest",
           "orchestration.retry": "#/$defs/OrchestrationRetryRequest",
           "orchestration.start": "#/$defs/OrchestrationStartRequest",
           "pricing.catalog": "#/$defs/PricingCatalogRequest",
@@ -4337,6 +4577,9 @@
         },
         {
           "$ref": "#/$defs/OrchestrationRetryRequest"
+        },
+        {
+          "$ref": "#/$defs/OrchestrationQueueResumeRequest"
         },
         {
           "$ref": "#/$defs/OrchestrationHistoryRequest"
@@ -4428,6 +4671,15 @@
         },
         {
           "$ref": "#/$defs/OrchestrationFallback"
+        },
+        {
+          "$ref": "#/$defs/OrchestrationQueued"
+        },
+        {
+          "$ref": "#/$defs/OrchestrationStarted"
+        },
+        {
+          "$ref": "#/$defs/OrchestrationPaused"
         },
         {
           "$ref": "#/$defs/KnowledgeIngestionProgress"

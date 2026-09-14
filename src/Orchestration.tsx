@@ -14,12 +14,14 @@ import type {
 } from "./generated/contract";
 
 type StreamingMessage = {
+  run_id: string;
   agent_id: string;
   phase: "analysis" | "review" | "synthesis";
   content: string;
 };
 
 type Approval = {
+  runId: string;
   permission: "workspace.read" | "workspace.write" | "terminal.execute";
   workspaceId: string;
   paths: string[];
@@ -47,14 +49,15 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
   const [selectedKnowledge, setSelectedKnowledge] = useState<string[]>([]);
   const [runs, setRuns] = useState<OrchestrationRun[]>([]);
   const [catalog, setCatalog] = useState<PricingCatalog | null>(null);
-  const [streaming, setStreaming] = useState<StreamingMessage | null>(null);
-  const [active, setActive] = useState(false);
+  const [streaming, setStreaming] = useState<Record<string, StreamingMessage>>({});
+  const [submitting, setSubmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [error, setError] = useState("");
   const [retryNotice, setRetryNotice] = useState("");
+  const [focusedRunId, setFocusedRunId] = useState<string | null>(null);
   const runId = useRef<string | null>(null);
-  const eventSequence = useRef(0);
+  const eventSequences = useRef<Record<string, number>>({});
   const workflow: WorkflowTemplate | undefined = snapshot?.workflows.find(
     (item) => item.id === workflowId && !item.archived,
   );
@@ -63,14 +66,17 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
     const result = await rpc({ method: "orchestration.history" });
     if (!("runs" in result)) throw new Error("Görev geçmişi alınamadı.");
     setRuns(result.runs);
+    setFocusedRunId((current) => current && result.runs.some((run) => run.run_id === current)
+      ? current : result.runs[0]?.run_id ?? null);
     const pending = result.runs.find((run) =>
-      ["running", "waiting_approval"].includes(run.status),
+      run.status === "waiting_approval",
     );
     if (pending) {
       runId.current = pending.run_id;
-      setActive(true);
+      setFocusedRunId(pending.run_id);
       if (pending.status === "waiting_approval" && pending.workspace_id)
         setApproval(pending.tool_action && pending.tool_action.tool !== "knowledge.search" ? {
+          runId: pending.run_id,
           permission: pending.tool_action.tool,
           workspaceId: pending.workspace_id,
           paths: [], tool: pending.tool_action.tool,
@@ -78,7 +84,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
           preview: pending.tool_action.preview, risk: pending.tool_action.risk,
           uncertain: pending.tool_action.status === "uncertain" ||
             (pending.error_class === "uncertain_tool" && pending.tool_action.status === "completed"),
-        } : { permission: "workspace.read", workspaceId: pending.workspace_id,
+        } : { runId: pending.run_id, permission: "workspace.read", workspaceId: pending.workspace_id,
           paths: pending.context_paths, tool: null, path: "", command: [], preview: "", risk: null,
           uncertain: false });
     }
@@ -125,40 +131,31 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       if (disposed || !validateEvent(payload))
         return;
       if (payload.type === "transport_error") {
-        if (runId.current) {
-          setError(payload.message);
-          setActive(false);
-          setStopping(false);
-          setStreaming(null);
-          runId.current = null;
-        }
+        setError(payload.message);
+        setStopping(false);
+        setStreaming({});
         return;
       }
       if (payload.type === "knowledge_ingestion_progress") return;
       if (!payload.type.startsWith("orchestration_")) return;
-      if (
-        payload.run_id !== runId.current ||
-        payload.sequence <= eventSequence.current
-      )
+      if (payload.sequence <= (eventSequences.current[payload.run_id] ?? 0))
         return;
-      eventSequence.current = payload.sequence;
+      eventSequences.current[payload.run_id] = payload.sequence;
       if (payload.type === "orchestration_chunk") {
         setRetryNotice("");
-        setStreaming((current) => ({
-          agent_id: payload.agent_id,
-          phase: payload.phase,
-          content:
-            current &&
-            current.agent_id === payload.agent_id &&
-            current.phase === payload.phase
-              ? current.content + payload.token
-              : payload.token,
-        }));
+        setStreaming((items) => {
+          const current = items[payload.run_id];
+          return { ...items, [payload.run_id]: {
+            run_id: payload.run_id, agent_id: payload.agent_id, phase: payload.phase,
+            content: current && current.agent_id === payload.agent_id &&
+              current.phase === payload.phase ? current.content + payload.token : payload.token,
+          }};
+        });
       } else if (payload.type === "orchestration_retrying") {
-        setStreaming(null);
+        setStreaming((items) => { const next = { ...items }; delete next[payload.run_id]; return next; });
         setRetryNotice(payload.message);
       } else if (payload.type === "orchestration_fallback") {
-        setStreaming(null);
+        setStreaming((items) => { const next = { ...items }; delete next[payload.run_id]; return next; });
         setRetryNotice(payload.message);
       } else if (payload.type === "orchestration_message_end") {
         setRuns((items) =>
@@ -179,7 +176,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               : run,
           ),
         );
-        setStreaming(null);
+        setStreaming((items) => { const next = { ...items }; delete next[payload.run_id]; return next; });
       } else if (payload.type === "orchestration_route") {
         setRuns((items) =>
           items.map((run) =>
@@ -208,8 +205,24 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               : run,
           ),
         );
+      } else if (payload.type === "orchestration_queued") {
+        setRuns((items) => items.map((run) => run.run_id === payload.run_id
+          ? { ...run, status: "queued", queue_position: payload.queue_position,
+              resumed_at: payload.resumed ? new Date().toISOString() : run.resumed_at,
+              worker_id: "" }
+          : run));
+      } else if (payload.type === "orchestration_started") {
+        setRuns((items) => items.map((run) => run.run_id === payload.run_id
+          ? { ...run, status: "running", queue_position: null,
+              worker_id: payload.worker_id, started_at: run.started_at ?? new Date().toISOString() }
+          : run));
+      } else if (payload.type === "orchestration_paused") {
+        setRuns((items) => items.map((run) => run.run_id === payload.run_id
+          ? { ...run, status: "paused", worker_id: "", error: payload.message }
+          : run));
       } else if (payload.type === "orchestration_approval_required") {
         setApproval({
+          runId: payload.run_id,
           permission: payload.permission,
           workspaceId: payload.workspace_id,
           paths: payload.paths,
@@ -238,11 +251,9 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       } else {
         if (payload.type === "orchestration_error") setError(payload.message);
         setRetryNotice("");
-        setActive(false);
         setStopping(false);
-        setStreaming(null);
-        setApproval(null);
-        runId.current = null;
+        setStreaming((items) => { const next = { ...items }; delete next[payload.run_id]; return next; });
+        setApproval((current) => current?.runId === payload.run_id ? null : current);
         void refresh().catch((e) => setError(String(e)));
       }
     })
@@ -272,7 +283,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
   }
   async function start(event: FormEvent) {
     event.preventDefault();
-    if (selected.length < 2 || selected.some((id) => !id) || !objective.trim() || active) return;
+    if (selected.length < 2 || selected.some((id) => !id) || !objective.trim() || submitting) return;
     const id = crypto.randomUUID();
     const contextPaths = [
       ...new Set(
@@ -316,7 +327,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       workflow_id: workflow?.id ?? null,
       workflow_version: workflow?.version ?? null,
       tool_action: null,
-      status: "running",
+      status: "queued",
       error: "",
       attempt: 1,
       parent_run_id: null,
@@ -330,12 +341,20 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
         return agent ? [agent.connection_id, ...agent.fallback_connection_ids] : [];
       }),
       model_call_attempts: [],
+      queue_sequence: 0,
+      queue_position: 1,
+      worker_id: "",
+      queued_at: new Date().toISOString(),
+      started_at: null,
+      resumed_at: null,
+      finished_at: null,
       messages: [],
     };
     runId.current = id;
-    eventSequence.current = 0;
+    eventSequences.current[id] = 0;
+    setFocusedRunId(id);
     setRuns((items) => [run, ...items]);
-    setActive(true);
+    setSubmitting(true);
     setError("");
     setRetryNotice("");
     try {
@@ -362,23 +381,25 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       });
     } catch (e) {
       runId.current = null;
-      setActive(false);
       setError(e instanceof Error ? e.message : String(e));
       await refresh().catch(() => undefined);
+    } finally {
+      setSubmitting(false);
     }
   }
   async function decide(decision: "approve" | "reject") {
-    if (!runId.current) return;
+    if (!approval) return;
+    const approvalRunId = approval.runId;
     setStopping(true);
     try {
       await rpc({
         method: "orchestration.approve",
-        params: { run_id: runId.current, decision },
+        params: { run_id: approvalRunId, decision },
       });
       setApproval(null);
       setRuns((items) =>
         items.map((run) =>
-          run.run_id === runId.current ? { ...run, status: "running" } : run,
+          run.run_id === approvalRunId ? { ...run, status: "queued" } : run,
         ),
       );
     } catch (e) {
@@ -387,13 +408,12 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       setStopping(false);
     }
   }
-  async function cancel() {
-    if (!runId.current) return;
+  async function cancel(targetRunId: string) {
     setStopping(true);
     try {
       await rpc({
         method: "orchestration.cancel",
-        params: { run_id: runId.current },
+        params: { run_id: targetRunId },
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -403,11 +423,11 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
   }
 
   async function retry(run: OrchestrationRun) {
-    if (active || run.status !== "failed" || run.error_class !== "retryable") return;
+    if (run.status !== "failed" || run.error_class !== "retryable") return;
     const id = crypto.randomUUID();
     runId.current = id;
-    eventSequence.current = 0;
-    setActive(true);
+    eventSequences.current[id] = 0;
+    setFocusedRunId(id);
     setError("");
     setRetryNotice("Checkpoint üzerinden başarısız düğüm yeniden başlatılıyor.");
     try {
@@ -418,13 +438,47 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       await refresh();
     } catch (e) {
       runId.current = null;
-      setActive(false);
       setError(e instanceof Error ? e.message : String(e));
       await refresh().catch(() => undefined);
     }
   }
 
-  const current = runs[0];
+  async function resume(run: OrchestrationRun) {
+    setStopping(true);
+    setFocusedRunId(run.run_id);
+    try {
+      await rpc({ method: "orchestration.queue.resume", params: { run_id: run.run_id } });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStopping(false);
+    }
+  }
+
+  function focusRun(run: OrchestrationRun) {
+    setFocusedRunId(run.run_id);
+    runId.current = run.run_id;
+    if (run.status !== "waiting_approval" || !run.workspace_id) {
+      setApproval(null);
+      return;
+    }
+    setApproval(run.tool_action && run.tool_action.tool !== "knowledge.search" ? {
+      runId: run.run_id, permission: run.tool_action.tool,
+      workspaceId: run.workspace_id, paths: [], tool: run.tool_action.tool,
+      path: run.tool_action.path, command: run.tool_action.command,
+      preview: run.tool_action.preview, risk: run.tool_action.risk,
+      uncertain: run.tool_action.status === "uncertain" ||
+        (run.error_class === "uncertain_tool" && run.tool_action.status === "completed"),
+    } : { runId: run.run_id, permission: "workspace.read", workspaceId: run.workspace_id,
+      paths: run.context_paths, tool: null, path: "", command: [], preview: "", risk: null,
+      uncertain: false });
+  }
+
+  const current = runs.find((run) => run.run_id === focusedRunId) ?? runs[0];
+  const active = !!current && ["queued", "running", "waiting_approval"].includes(current.status);
+  const queueRuns = runs.filter((run) =>
+    ["queued", "running", "paused", "waiting_approval"].includes(run.status));
   const currentWorkflow = current?.workflow_id
     ? snapshot?.workflows.find((item) => item.id === current.workflow_id)
     : undefined;
@@ -436,7 +490,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
     : [];
   const messages: (OrchestrationMessage | StreamingMessage)[] = [
     ...lineageMessages,
-    ...(streaming ? [streaming] : []),
+    ...(current && streaming[current.run_id] ? [streaming[current.run_id]] : []),
   ];
   const name = (id: string) =>
     snapshot?.agents.find((agent) => agent.id === id)?.name ?? "Ajan";
@@ -499,7 +553,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
             <label>
               Workflow tarifi
               <select value={workflowId} onChange={(event) => setWorkflowId(event.target.value)}
-                disabled={active}>
+                disabled={submitting}>
                 <option value="">Serbest ajan görevi</option>
                 {snapshot!.workflows.filter((item) => !item.archived).map((item) => (
                   <option key={item.id} value={item.id}>{item.name} · v{item.version}</option>
@@ -516,13 +570,13 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               value={objective}
               onChange={(e) => setObjective(e.target.value)}
               placeholder="Ekibin çözmesini istediğiniz hedefi yazın…"
-              disabled={active}
+              disabled={submitting}
             />
             {workflow?.objective_prefix && <small>
               Sabit önek: {workflow.objective_prefix}
             </small>}
           </label>
-          <fieldset disabled={active}>
+          <fieldset disabled={submitting}>
             <legend>Ajanlar</legend>
             {workflow ? workflow.agent_slots.map((slot, index) => (
               <label key={`${workflow.id}-${slot.name}`}>
@@ -555,7 +609,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               </label>
             ))}
           </fieldset>
-          {knowledgeCollections.length > 0 && <fieldset disabled={active}>
+          {knowledgeCollections.length > 0 && <fieldset disabled={submitting}>
             <legend>Yerel bilgi koleksiyonları</legend>
             {knowledgeCollections.map((collection) => (
               <label className="agent-choice" key={collection.id}>
@@ -578,7 +632,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               onChange={(e) =>
                 setRoutingMode(e.target.value as "manual" | "auto")
               }
-              disabled={active || !!workflow}
+              disabled={submitting || !!workflow}
             >
               <option value="auto">Otomatik · göreve göre sırala</option>
               <option value="manual">Manuel · seçim sırasını koru</option>
@@ -593,7 +647,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
                 max={14}
                 value={workflow?.max_model_calls ?? maxModelCalls}
                 onChange={(e) => setMaxModelCalls(Number(e.target.value))}
-                disabled={active || !!workflow}
+                disabled={submitting || !!workflow}
               />
             </label>
             <label>
@@ -605,7 +659,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
                 step={0.01}
                 value={workflow ? workflow.max_cost_microusd / 1_000_000 : maxCostUsd}
                 onChange={(e) => setMaxCostUsd(Number(e.target.value))}
-                disabled={active || !!workflow}
+                disabled={submitting || !!workflow}
               />
             </label>
             <label>
@@ -613,7 +667,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               <select
                 value={workflow?.max_output_tokens ?? maxOutputTokens}
                 onChange={(e) => setMaxOutputTokens(Number(e.target.value))}
-                disabled={active || !!workflow}
+                disabled={submitting || !!workflow}
               >
                 {[256, 512, 1024, 2048, 4096].map((value) => (
                   <option value={value} key={value}>{value}</option>
@@ -640,7 +694,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
             <select
               value={workflow?.rounds ?? rounds}
               onChange={(e) => setRounds(Number(e.target.value))}
-              disabled={active || !!workflow}
+              disabled={submitting || !!workflow}
             >
               <option value={1}>1 tur</option>
               <option value={2}>2 tur</option>
@@ -652,7 +706,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
             <select
               value={workspaceId}
               onChange={(e) => setWorkspaceId(e.target.value)}
-              disabled={active}
+              disabled={submitting}
             >
               <option value="">Bağlam kullanma</option>
               {snapshot?.workspaces.map((workspace) => (
@@ -670,7 +724,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
                 value={contextInput}
                 onChange={(e) => setContextInput(e.target.value)}
                 placeholder={"README.md\nsrc/App.tsx"}
-                disabled={active}
+                disabled={submitting}
               />
               <small>
                 Her satıra bir dosya. En fazla 10 dosya; yalnız okuma izni olan
@@ -679,7 +733,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
             </label>
           )}
           {(workspaceId || workflow) && (
-            <fieldset disabled={active || !!workflow}>
+            <fieldset disabled={submitting || !!workflow}>
               <legend>Model araç önerileri</legend>
               {(["workspace.write", "terminal.execute"] as const).map((tool) => (
                 <label className="agent-choice" key={tool}>
@@ -736,20 +790,10 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
               </div>
             </div>
           )}
-          {active ? (
-            <button
-              type="button"
-              className="button secondary"
-              onClick={cancel}
-              disabled={stopping}
-            >
-              <Square size={14} />
-              {stopping ? "İşleniyor…" : "Görevi durdur"}
-            </button>
-          ) : (
-            <button
-              className="button primary"
-              disabled={
+          <button
+            className="button primary"
+            disabled={
+                submitting ||
                 selected.length < 2 ||
                 selected.some((id) => !id) ||
                 !objective.trim() ||
@@ -764,14 +808,35 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
                 missingWorkflowWorkspace ||
                 missingWorkflowKnowledge ||
                 (contextRequested && !workspaceId)
-              }
-            >
-              <Play size={15} />
-              Görevi başlat
-            </button>
-          )}
+            }
+          >
+            <Play size={15} />
+            {submitting ? "Kuyruğa alınıyor…" : "Görevi kuyruğa al"}
+          </button>
         </form>
         <section className="panel orchestration-transcript">
+          {!!queueRuns.length && <div className="task-queue">
+            <div className="task-queue-heading">
+              <div><strong>Görev kuyruğu</strong><small>2 worker · bağlantı başına 1 çağrı</small></div>
+              <span>{queueRuns.filter((run) => run.status === "running").length}/2 çalışıyor</span>
+            </div>
+            {queueRuns
+              .sort((left, right) => (left.queue_position ?? 0) - (right.queue_position ?? 0))
+              .map((run) => <div className={`task-queue-row ${run.run_id === current?.run_id ? "selected" : ""}`}
+                key={run.run_id}>
+                <button type="button" className="task-queue-main" onClick={() => focusRun(run)}>
+                  <span>{run.objective}</span>
+                  <small>{run.status === "queued" ? `Kuyruk #${run.queue_position ?? "–"}` :
+                    run.status === "running" ? `${run.worker_id} çalışıyor` :
+                    run.status === "waiting_approval" ? "Onay bekliyor · worker boşta" :
+                    "Uygulama yeniden başlatıldı · duraklatıldı"}</small>
+                </button>
+                {run.status === "paused" ? <button type="button" className="button secondary"
+                  onClick={() => void resume(run)} disabled={stopping}>Sürdür</button>
+                  : <button type="button" className="icon-button danger" title="Görevi iptal et"
+                    onClick={() => void cancel(run.run_id)} disabled={stopping}><Square size={13} /></button>}
+              </div>)}
+          </div>}
           <div className="panel-heading">
             <div>
               <h2>{current?.objective ?? "Görev akışı"}</h2>

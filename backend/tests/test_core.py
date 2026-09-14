@@ -17,6 +17,7 @@ from zerocost.providers.base import (Message, PermanentProviderError, ProviderEr
 from zerocost.pricing import TokenUsage
 from zerocost.workspace_tools import apply_write, prepare_write
 from zerocost.terminal_tools import execute_command, prepare_command
+from zerocost.checkpoints import checkpoint_path
 
 
 @pytest.fixture
@@ -184,7 +185,7 @@ def test_v4_orchestration_migrates_with_budget_defaults(tmp_path):
 
     migrated = Store(path)
     run = migrated.orchestration_history().runs[0]
-    assert migrated.snapshot().database_version == 14
+    assert migrated.snapshot().database_version == 15
     assert run.routing_mode == 'manual' and run.max_model_calls == 5
     assert run.agent_ids == [a.id for a in agents]
     assert migrated.db.execute('PRAGMA foreign_key_check').fetchall() == []
@@ -344,7 +345,7 @@ def test_v8_knowledge_data_migrates_to_versioned_hash_cache(tmp_path):
 
     migrated = Store(path)
     source = migrated.knowledge_source_hash(collection_id, workspace.id, 'legacy.md')
-    assert migrated.snapshot().database_version == 14
+    assert migrated.snapshot().database_version == 15
     assert source == {'content_hash': 'old-hash', 'status': 'ready', 'index_version': 'legacy-v8'}
     assert migrated.search_knowledge_fts(collection_id, 'korunan')[0]['content'] == 'korunan içerik'
     assert migrated.db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
@@ -807,14 +808,15 @@ def test_langgraph_multi_agent_round_is_attributed_and_persisted(tmp_path):
         assert [message.phase for message in history.messages] == ['analysis', 'analysis', 'synthesis']
         assert [event.type for event in events] == [
             'orchestration_route',
+            'orchestration_queued', 'orchestration_started',
             'orchestration_chunk', 'orchestration_message_end', 'orchestration_usage',
             'orchestration_chunk', 'orchestration_message_end', 'orchestration_usage',
             'orchestration_chunk', 'orchestration_message_end', 'orchestration_usage',
             'orchestration_end']
-        assert [event.sequence for event in events] == list(range(1, 12))
+        assert [event.sequence for event in events] == list(range(1, 14))
         assert history.used_model_calls == 3
         assert history.max_model_calls == 5
-        assert (tmp_path / 'orchestration-checkpoints.sqlite3').exists()
+        assert any((tmp_path / 'orchestration-checkpoints').glob('*.sqlite3'))
         store.close()
     asyncio.run(scenario())
 
@@ -1005,7 +1007,7 @@ def test_failed_node_can_resume_as_new_run_from_persistent_checkpoint(tmp_path):
         assert retry.used_model_calls == 2 and retry.cumulative_model_calls == 6
         assert len(retry.messages) == 2
         assert sum(len(run.messages) for run in runs.values()) == 3
-        assert (tmp_path / 'durable-retry-checkpoints.sqlite3').exists()
+        assert any((tmp_path / 'durable-retry-checkpoints').glob('*.sqlite3'))
         await restarted.close()
         reopened.close()
     asyncio.run(scenario())
@@ -1441,3 +1443,198 @@ def test_model_write_proposal_waits_for_diff_approval_then_writes(tmp_path):
         assert events[-1].sequence > approval_sequence
         store.close()
     asyncio.run(scenario())
+
+
+def test_persistent_queue_uses_two_workers_and_queued_cancel_has_no_model_call(tmp_path):
+    async def scenario():
+        store = Store(tmp_path / 'queue.sqlite3')
+        store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+        connection = store.snapshot().connections[0]
+        for name in ('A', 'B'):
+            store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+        agent_ids = [agent.id for agent in store.snapshot().agents]
+        gate = asyncio.Event()
+        active_calls = 0
+        maximum_active_calls = 0
+
+        class TrackingProvider(FakeProvider):
+            async def stream_reply(self, messages, *, api_key=None, max_tokens=512):
+                nonlocal active_calls, maximum_active_calls
+                active_calls += 1
+                maximum_active_calls = max(maximum_active_calls, active_calls)
+                try:
+                    await gate.wait()
+                    yield 'ok'
+                finally:
+                    active_calls -= 1
+
+        service = ChatService(store, lambda _: None, lambda *_: TrackingProvider())
+        for run_id in ('queue-1', 'queue-2', 'queue-3'):
+            response = await service.handle(request(
+                'orchestration.start', run_id=run_id, objective=run_id,
+                agent_ids=agent_ids, rounds=1, max_model_calls=3))
+            assert response.ok
+        states = {item.run_id: item for item in store.orchestration_history().runs}
+        assert {states['queue-1'].status, states['queue-2'].status} == {'running'}
+        assert states['queue-3'].status == 'queued' and states['queue-3'].queue_position == 1
+        assert {states['queue-1'].worker_id, states['queue-2'].worker_id} == {'worker-1', 'worker-2'}
+
+        cancelled = await service.handle(request('orchestration.cancel', run_id='queue-3'))
+        assert cancelled.ok
+        assert store.orchestration_spec('queue-3')['used_model_calls'] == 0
+        assert store.orchestration_spec('queue-3')['status'] == 'cancelled'
+        gate.set()
+        await asyncio.gather(*list(service.tasks.values()))
+        assert maximum_active_calls == 1  # same connection is serialized across workers
+        await service.close()
+        store.close()
+    asyncio.run(scenario())
+
+
+def test_two_workers_run_different_connections_concurrently(tmp_path):
+    async def scenario():
+        store = Store(tmp_path / 'parallel-queue.sqlite3')
+        agent_groups = []
+        for group in range(2):
+            ids = []
+            for peer in range(2):
+                store.create_connection(ConnectionInput(
+                    name=f'C{group}-{peer}', provider='ollama', model_id=f'm{group}-{peer}'))
+                connection = store.snapshot().connections[-1]
+                store.create_agent(AgentInput(
+                    name=f'A{group}-{peer}', role='review', connection_id=connection.id))
+                ids.append(store.snapshot().agents[-1].id)
+            agent_groups.append(ids)
+        release = asyncio.Event()
+        both_started = asyncio.Event()
+        active = 0
+        maximum = 0
+
+        class ParallelProvider(FakeProvider):
+            async def stream_reply(self, messages, *, api_key=None, max_tokens=512):
+                nonlocal active, maximum
+                active += 1
+                maximum = max(maximum, active)
+                if active == 2:
+                    both_started.set()
+                try:
+                    await release.wait()
+                    yield 'ok'
+                finally:
+                    active -= 1
+
+        service = ChatService(store, lambda _: None, lambda *_: ParallelProvider())
+        for index, agent_ids in enumerate(agent_groups):
+            assert (await service.handle(request(
+                'orchestration.start', run_id=f'parallel-{index}', objective='work',
+                agent_ids=agent_ids, rounds=1, max_model_calls=3))).ok
+        await asyncio.wait_for(both_started.wait(), timeout=2)
+        assert maximum == 2
+        release.set()
+        await asyncio.gather(*list(service.tasks.values()))
+        assert all(store.orchestration_spec(f'parallel-{index}')['status'] == 'completed'
+                   for index in range(2))
+        store.close()
+    asyncio.run(scenario())
+
+
+def test_resumed_queue_item_precedes_new_fifo_work(tmp_path):
+    store = Store(tmp_path / 'resume-order.sqlite3')
+    store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+    connection = store.snapshot().connections[0]
+    for name in ('A', 'B'):
+        store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+    agent_ids = [agent.id for agent in store.snapshot().agents]
+    for run_id in ('first', 'second', 'third'):
+        store.start_orchestration(run_id, run_id, 1, agent_ids)
+    assert store.claim_next_orchestration('worker-1')['run_id'] == 'first'
+    store.set_orchestration_status('first', 'waiting_approval')
+    assert store.claim_next_orchestration('worker-1')['run_id'] == 'second'
+    store.set_orchestration_status('first', 'waiting_approval')
+    store.enqueue_orchestration('first', resumed=True)
+    assert store.claim_next_orchestration('worker-2')['run_id'] == 'first'
+    assert store.queue_position('third') == 1
+    store.close()
+
+
+def test_shutdown_pauses_active_and_queued_runs_without_persisting_credentials(tmp_path):
+    async def scenario():
+        store = Store(tmp_path / 'pause.sqlite3')
+        store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+        connection = store.snapshot().connections[0]
+        for name in ('A', 'B'):
+            store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+        agent_ids = [agent.id for agent in store.snapshot().agents]
+        gate = asyncio.Event()
+        service = ChatService(store, lambda _: None,
+                              lambda *_: FakeProvider(tokens=('late',), gate=gate))
+        for run_id in ('pause-1', 'pause-2', 'pause-3'):
+            assert (await service.handle(request(
+                'orchestration.start', run_id=run_id, objective='wait',
+                agent_ids=agent_ids, rounds=1, max_model_calls=3))).ok
+        await asyncio.sleep(0)
+        await service.close()
+        states = {run.run_id: run for run in store.orchestration_history().runs}
+        assert all(states[run_id].status == 'paused'
+                   for run_id in ('pause-1', 'pause-2', 'pause-3'))
+        assert service.queue_jobs  # memory-only credentials vanish with the service instance
+        store.close()
+    asyncio.run(scenario())
+
+
+def test_orchestration_token_batch_flushes_before_provider_error(tmp_path):
+    async def scenario():
+        store = Store(tmp_path / 'batch.sqlite3')
+        store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+        connection = store.snapshot().connections[0]
+        for name in ('A', 'B'):
+            store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+        events = []
+        service = ChatService(store, events.append, lambda *_: FakeProvider(
+            tokens=('a', 'b', 'c'), failure=PermanentProviderError('stop')))
+        response = await service.handle(request(
+            'orchestration.start', run_id='batch-error', objective='test',
+            agent_ids=[agent.id for agent in store.snapshot().agents], rounds=1,
+            max_model_calls=3))
+        assert response.ok
+        await service.tasks['batch-error']
+        chunks = [event.token for event in events if event.type == 'orchestration_chunk']
+        assert chunks == ['abc']
+        assert events[-1].type == 'orchestration_error'
+        store.close()
+    asyncio.run(scenario())
+
+
+def test_paused_run_without_checkpoint_restarts_from_initial_state(tmp_path):
+    async def scenario():
+        store = Store(tmp_path / 'pre-checkpoint.sqlite3')
+        store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+        connection = store.snapshot().connections[0]
+        for name in ('A', 'B'):
+            store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+        agent_ids = [agent.id for agent in store.snapshot().agents]
+        store.start_orchestration('early-pause', 'resume safely', 1, agent_ids,
+                                  fallback_chain=[[connection.id], [connection.id]])
+        store.claim_next_orchestration('worker-1')
+        store.pause_orchestrations(['early-pause'])
+        service = ChatService(store, lambda _: None, lambda *_: FakeProvider(tokens=('ok',)))
+        resumed = await service.handle(request(
+            'orchestration.queue.resume', run_id='early-pause'))
+        assert resumed.ok
+        await service.tasks['early-pause']
+        run = store.orchestration_history().runs[0]
+        assert run.status == 'completed' and len(run.messages) == 3
+        store.close()
+    asyncio.run(scenario())
+
+
+def test_existing_shared_checkpoint_database_remains_addressable(tmp_path):
+    database = tmp_path / 'legacy.sqlite3'
+    legacy = tmp_path / 'legacy-checkpoints.sqlite3'
+    connection = sqlite3.connect(legacy)
+    connection.execute('CREATE TABLE checkpoints(thread_id TEXT)')
+    connection.execute('INSERT INTO checkpoints VALUES (?)', ('existing-run',))
+    connection.commit()
+    connection.close()
+    assert checkpoint_path(database, 'existing-run') == legacy
+    assert checkpoint_path(database, 'new-run').parent == tmp_path / 'legacy-checkpoints'

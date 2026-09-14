@@ -34,6 +34,7 @@ Windows'ta Python komutu `.venv\Scripts\python.exe` olur. Node yardımcı betikl
 - LangGraph tabanlı 2–4 ajan tartışması, 1–3 tur karşı görüş ve koordinatör sentezi.
 - Geçici sağlayıcı hatalarında sınırlı backoff ve kalıcı checkpoint'ten kullanıcı tetiklemeli düğüm devamı.
 - Ajan/aşama kimlikli canlı görev olayları, SQLite görev geçmişi ve LangGraph SQLite checkpoint'leri.
+- Kalıcı FIFO görev kuyruğu, iki orkestrasyon worker'ı, bağlantı başına tek eşzamanlı model çağrısı ve güvenli yeniden sürdürme.
 - Ajan bazında `workspace.read` izni; sınırlandırılmış klasör listeleme ve UTF-8 metin okuma araçları.
 - Kullanıcının seçtiği en fazla 10 çalışma alanı dosyasını çoklu ajan bağlamına ekleme.
 - Yerel Ollama embedding modeli keşfi, bilgi koleksiyonları ve SQLite FTS5/float32 vektör depolama temeli.
@@ -52,7 +53,7 @@ Rust ajanın bağlantısını Python'daki kayıt üzerinden çözer ve yalnız i
 
 Claude sistem talimatları mesaj listesinden ayrılır. Gemini'nin dört ayarlanabilir güvenlik kategorisi `BLOCK_NONE` olarak gönderilir; sağlayıcının değiştirilemeyen korumaları devam eder. Kesilen, engellenen veya token sınırına ulaşan yanıtlar kısmi içerikle başarısız olarak kaydedilir. Bulut ajanlarında mesaj, sohbet bağlamı ve çoklu ajan görevinde kullanıcı tarafından seçilen dosya içeriği ilgili sağlayıcıya iletilir. Mevcut çekirdek aynı anda bir sohbet veya çoklu ajan görevi yürütür.
 
-SDK entegrasyonları sahte HTTP yanıtlarıyla test edilir; gerçek bulut anahtarı ve ücretli çağrı kullanılmadı. macOS native kasa testi yalnız sentetik anahtar oluşturup siler: `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --include-ignored`. Windows/Linux kasa davranışları bu cihazda doğrulanmadı. Geliştirme ve paketleme ortamı Python 3.12.14'e geçirildi.
+Orkestrasyon kuyruğu iki görevi çalıştırabilir; aynı bağlantıya bağlı çağrılar hesap/rate-limit çakışmasını önlemek için sıraya alınır. Tekli sohbet sırasında orkestrasyon worker'ları yeni iş başlatmaz. SDK entegrasyonları sahte HTTP yanıtlarıyla test edilir; gerçek bulut anahtarı ve ücretli çağrı kullanılmadı. macOS native kasa testi yalnız sentetik anahtar oluşturup siler: `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --include-ignored`. Windows/Linux kasa davranışları bu cihazda doğrulanmadı. Geliştirme ve paketleme ortamı Python 3.12.14'e geçirildi.
 
 ## Faz 2: ajan masası, router ve kontrollü dosya bağlamı
 
@@ -132,6 +133,16 @@ Her ajan birincil model bağlantısının arkasına en fazla üç açık fallbac
 
 Bir bağlantıda üç geçici LLM denemesi tükendiğinde sıradaki aday denenir. 429 `Retry-After` değeri 30 saniye veya daha azsa aynı bağlantı beklenir; daha uzunsa fallback'e geçilir. Kalıcı kimlik doğrulama, model veya protokol hatası zinciri durdurur. Her aday fiyat kataloğu ve kalan aile bütçesiyle çağrıdan önce kontrol edilir; bilinmeyen fiyat ve yetersiz bütçe kapalı davranışla atlanır. `model_call_attempts` tablosu bağlantı, düğüm, sonuç, token, maliyet ve süreyi saklar. Geçişler UI'da canlı görünür, tamamlanan run model çağrı günlüğünü gösterir. Güven ve kapsam kararı [ADR-0004](docs/adr/0004-explicit-model-fallback.md) içinde kayıtlıdır.
 
+## Kalıcı görev kuyruğu
+
+Çoklu ajan görevleri SQLite şema v15 ile kalıcı FIFO kuyruğuna girer. Sabit iki worker farklı görevleri eşzamanlı yürütebilir; her model bağlantısı süreç genelinde kapasitesi bir olan semaphore ile korunur. Aynı bağlantıdaki ikinci çağrı worker görevini koruyarak bağlantı boşalana kadar bekler ve bekleme sırasında çağrı ya da maliyet bütçesi tüketmez.
+
+`waiting_approval` görevi worker slotunu bırakır ve özgün `queue_sequence` değerini korur. Kullanıcı onay verdiğinde `resumed_at` yazılır; worker seçimi önce sürdürülen işleri, sonra normal FIFO sırasını alır. Kuyruktaki görev iptal edilirse hiçbir model çağrısı yapılmaz.
+
+API anahtarları kuyruk tablosuna veya checkpoint'e yazılmaz; yalnız sidecar belleğindeki iş zarfında tutulur. Uygulama kapanırsa `queued` ve `running` kayıtlar `paused` olur. Kullanıcı **Sürdür** dediğinde Rust gerekli anahtarları OS kasasından yeniden enjekte eder. Checkpoint gerçekten varsa düğümden devam edilir; worker atanıp ilk checkpoint yazılmadan kapanan görev başlangıç durumundan güvenle çalıştırılır. Yeni görevler eşzamanlı SQLite yazma kilidi yaratmayan run-aile-bazlı checkpoint dosyaları kullanır; eski ortak checkpoint dosyasındaki kayıtlar geriye uyumlu biçimde okunur.
+
+Orkestrasyon token olayları 25 ms veya 256 karakter eşiğinde gruplanır. Tamamlanma, hata, iptal, retry, fallback, onay ve worker bırakma öncesinde tampon zorunlu olarak boşaltılır. Kararlar [ADR-0005](docs/adr/0005-persistent-task-queue.md) içinde kayıtlıdır.
+
 ## Pydantic → TypeScript sözleşmesi
 
 Tek kaynak `backend/zerocost/models.py` dosyasıdır.
@@ -145,7 +156,7 @@ npm run schema:check
 
 Çoklu ajan görevleri manuel veya deterministik otomatik routing kullanır. Router kararı ve gerekçesi görev kaydında tutulur. Çağrı bütçesi, görev başlamadan önce gerekli model çağrılarını sınırlar; çıktı bütçesi her sağlayıcı isteğine doğrudan uygulanır. Çalışma alanı dosyaları seçildiyse LangGraph görevi `waiting_approval` checkpoint'inde durur. İçerik ancak kullanıcı somut dosya listesini onayladıktan sonra okunur; ret halinde hiçbir model çağrısı yapılmaz.
 
-Protokol v1 yapılandırma komutlarına ek olarak sohbet, kasa, workspace okuma, `agent.fallbacks.set`, `pricing.catalog`, `skill.create/assign/unassign`, `workflow.create/archive`, `knowledge.snapshot`, `knowledge.collection.create` ve `orchestration.start/approve/retry/cancel/history` komutlarını sunar. Her komut `request_id` ve `protocol_version` içerir. Akış parçaları `run_id`, monoton `sequence`, olay türü, ajan/aşama kimliği ve terminal işareti taşır. Yanıtlar ile akış olayları Pydantic'ten üretilen ayrı çalışma zamanı doğrulayıcılarından geçer.
+Protokol v1 yapılandırma komutlarına ek olarak sohbet, kasa, workspace okuma, `agent.fallbacks.set`, `pricing.catalog`, `skill.create/assign/unassign`, `workflow.create/archive`, `knowledge.snapshot`, `knowledge.collection.create` ve `orchestration.start/approve/retry/queue.resume/cancel/history` komutlarını sunar. Her komut `request_id` ve `protocol_version` içerir. Akış parçaları `run_id`, monoton `sequence`, olay türü, ajan/aşama kimliği ve terminal işareti taşır. Yanıtlar ile akış olayları Pydantic'ten üretilen ayrı çalışma zamanı doğrulayıcılarından geçer.
 
 ## Veri ve süreç yaşam döngüsü
 
@@ -181,6 +192,6 @@ macOS uygulaması `src-tauri/target/release/bundle/macos/ZeroCost.app` altında 
 ## Sonraki geliştirme dilimi
 
 1. Workflow tarifleri için çalıştırma geçmişi filtresi, kopyalama ve açık sürüm karşılaştırması.
-2. Task queue, worker pool ve stream backpressure.
+2. Kuyruk kapasitesi ve bağlantı bekleme süreleri için ölçüm/observability paneli.
 3. Ayrı bir dilimde görsel graph editörü ve topoloji doğrulaması.
 4. Üçüncü taraf plugin manifesti, imza doğrulaması ve sandbox sınırı.

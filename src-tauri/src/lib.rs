@@ -43,6 +43,9 @@ fn allowed_event_type(kind: &str) -> bool {
             | "orchestration_tool_result"
             | "orchestration_retrying"
             | "orchestration_fallback"
+            | "orchestration_queued"
+            | "orchestration_started"
+            | "orchestration_paused"
             | "knowledge_ingestion_progress"
     )
 }
@@ -248,6 +251,7 @@ fn route_request(client: &Sidecar, mut request: Value) -> Result<Value, String> 
             | "orchestration.start"
             | "orchestration.approve"
             | "orchestration.retry"
+            | "orchestration.queue.resume"
     ) {
         return client.exchange(&request);
     }
@@ -299,7 +303,7 @@ fn route_request(client: &Sidecar, mut request: Value) -> Result<Value, String> 
         vec![agent_chain(agent_id)?[0].clone()]
     } else if matches!(
         method.as_str(),
-        "orchestration.approve" | "orchestration.retry"
+        "orchestration.approve" | "orchestration.retry" | "orchestration.queue.resume"
     ) {
         let history = client.exchange(&json!({"method":"orchestration.history",
             "protocol_version":1,
@@ -505,6 +509,9 @@ mod tests {
     fn ingestion_bridge_allows_bounded_long_running_embedding() {
         assert!(allowed_event_type("knowledge_ingestion_progress"));
         assert!(allowed_event_type("orchestration_fallback"));
+        assert!(allowed_event_type("orchestration_queued"));
+        assert!(allowed_event_type("orchestration_started"));
+        assert!(allowed_event_type("orchestration_paused"));
         assert!(!allowed_event_type("unknown_progress"));
         assert_eq!(
             response_timeout_seconds(&json!({"method":"knowledge.source.ingest"}), true),

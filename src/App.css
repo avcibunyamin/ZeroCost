@@ -1085,6 +1085,51 @@ main {
   max-height: calc(100vh - 190px);
   overflow-y: auto;
 }
+.task-queue {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 20px;
+  padding: 12px;
+  border: 1px solid #e0e9e2;
+  border-radius: 14px;
+  background: #f7faf8;
+}
+.task-queue-heading,
+.task-queue-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.task-queue-heading > div,
+.task-queue-main { display: grid; gap: 2px; }
+.task-queue-heading small,
+.task-queue-main small { color: #879488; }
+.task-queue-heading > span { font-size: 11px; color: #3f8068; }
+.task-queue-row {
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: white;
+}
+.task-queue-row.selected { border-color: #aac9b8; }
+.task-queue-main {
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.task-queue-main span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+}
+.task-queue-row .button { padding: 6px 10px; }
 .orchestration-message {
   margin-top: 13px;
   padding: 15px;

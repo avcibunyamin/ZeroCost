@@ -393,7 +393,8 @@ class VaultStatus(Model):
     has_key: bool
 
 
-OrchestrationStatus = Literal["running", "waiting_approval", "completed", "cancelled", "failed", "interrupted"]
+OrchestrationStatus = Literal["queued", "running", "paused", "waiting_approval",
+                              "completed", "cancelled", "failed", "interrupted"]
 OrchestrationPhase = Literal["analysis", "review", "synthesis"]
 
 
@@ -485,6 +486,11 @@ class OrchestrationRetryInput(Model):
 class OrchestrationRetryRequest(RequestBase):
     method: Literal["orchestration.retry"]
     params: OrchestrationRetryInput
+
+
+class OrchestrationQueueResumeRequest(RequestBase):
+    method: Literal["orchestration.queue.resume"]
+    params: RunInput
 
 
 class OrchestrationHistoryRequest(RequestBase):
@@ -707,6 +713,13 @@ class OrchestrationRun(Model):
     cumulative_cost_microusd: int
     fallback_chain: list[list[str]] = Field(default_factory=list)
     model_call_attempts: list["ModelCallAttempt"] = Field(default_factory=list)
+    queue_sequence: int
+    queue_position: int | None
+    worker_id: str
+    queued_at: str
+    started_at: str | None
+    resumed_at: str | None
+    finished_at: str | None
     tool_action: ToolAction | None
     status: OrchestrationStatus
     error: str
@@ -853,12 +866,41 @@ class OrchestrationFallback(Model):
     is_final: Literal[False] = False
 
 
+class OrchestrationQueued(Model):
+    protocol_version: Literal[1] = 1
+    type: Literal["orchestration_queued"] = "orchestration_queued"
+    run_id: str
+    sequence: int
+    queue_position: int = Field(ge=1)
+    resumed: bool = False
+    is_final: Literal[False] = False
+
+
+class OrchestrationStarted(Model):
+    protocol_version: Literal[1] = 1
+    type: Literal["orchestration_started"] = "orchestration_started"
+    run_id: str
+    sequence: int
+    worker_id: str
+    is_final: Literal[False] = False
+
+
+class OrchestrationPaused(Model):
+    protocol_version: Literal[1] = 1
+    type: Literal["orchestration_paused"] = "orchestration_paused"
+    run_id: str
+    sequence: int
+    message: str
+    is_final: Literal[False] = False
+
+
 Request = Annotated[Union[SnapshotRequest, ConnectionRequest, AgentRequest, WorkspaceRequest,
                          AgentPermissionsRequest, AgentFallbacksRequest,
                          WorkspaceListRequest, WorkspaceReadRequest,
                          ModelsRequest, ChatStartRequest, CancelRequest, HistoryRequest, VaultRequest,
                          OrchestrationStartRequest, OrchestrationCancelRequest,
                          OrchestrationApprovalRequest, OrchestrationRetryRequest,
+                         OrchestrationQueueResumeRequest,
                          OrchestrationHistoryRequest,
                          PricingCatalogRequest, SkillCreateRequest, SkillAssignRequest,
                          SkillUnassignRequest, WorkflowCreateRequest, WorkflowArchiveRequest,
@@ -888,4 +930,5 @@ class Contract(Model):
                  OrchestrationEnd, OrchestrationError, OrchestrationRoute,
                  OrchestrationApprovalRequired, OrchestrationUsage,
                  OrchestrationToolResult, OrchestrationRetrying, OrchestrationFallback,
+                 OrchestrationQueued, OrchestrationStarted, OrchestrationPaused,
                  KnowledgeIngestionProgress]

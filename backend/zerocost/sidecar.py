@@ -16,7 +16,8 @@ from pydantic import TypeAdapter, ValidationError, SecretStr
 from .models import Request, Failure, Success
 from .storage import Store
 from .workspace_tools import inspect_file_size, list_directory, read_file
-from .models import OrchestrationEnd, OrchestrationRoute
+from .models import (OrchestrationEnd, OrchestrationPaused, OrchestrationQueued,
+                     OrchestrationRoute, OrchestrationStarted)
 from .pricing import CATALOG_VERSION, catalog, estimate_plan
 from .embeddings import OllamaEmbeddings
 from .chunking import build_semantic_chunks
@@ -27,6 +28,7 @@ from .models import KnowledgeIngestionProgress, KnowledgeIngestionResult
 from .knowledge_search import HybridKnowledgeSearch
 from .skills import skill_prompt, validate_skill_requirements
 from .workflows import compile_workflow, validate_workflow_bindings
+from .checkpoints import checkpoint_exists
 
 MAX_FRAME_BYTES = 64 * 1024
 request_adapter = TypeAdapter(Request)
@@ -89,6 +91,9 @@ def emit(value):
 
 
 class ChatService:
+    WORKER_IDS = ('worker-1', 'worker-2')
+    MAX_QUEUED_ORCHESTRATIONS = 100
+
     def __init__(self, store: Store, output=emit, provider_factory=get_provider,
                  embedding_factory=OllamaEmbeddings):
         self.store = store
@@ -96,7 +101,82 @@ class ChatService:
         self.provider_factory = provider_factory
         self.embedding_factory = embedding_factory
         self.tasks = {}
+        self.chat_runs = set()
+        self.queue_jobs = {}
+        self.active_workers = {}
+        self.queue_lock = asyncio.Lock()
+        self.closing = False
         self.orchestrator = None
+
+    def _next_event_sequence(self, run_id):
+        spec = self.store.orchestration_spec(run_id)
+        sequence = (spec['event_sequence'] if spec else 0) + 1
+        self.store.set_event_sequence(run_id, sequence)
+        return sequence
+
+    def checkpoint_exists(self, thread_id):
+        return checkpoint_exists(self.store.path, thread_id)
+
+    async def queue_orchestration(self, spec, credentials, *, resume=None,
+                                  checkpoint_thread_id=None, continue_checkpoint=False,
+                                  resumed=False):
+        run_id = spec['run_id']
+        self.queue_jobs[run_id] = {
+            'credentials': credentials,
+            'resume': resume,
+            'checkpoint_thread_id': checkpoint_thread_id,
+            'continue_checkpoint': continue_checkpoint,
+        }
+        position = self.store.queue_position(run_id)
+        sequence = self._next_event_sequence(run_id)
+        self.output(OrchestrationQueued(
+            run_id=run_id, sequence=sequence, queue_position=position or 1,
+            resumed=resumed))
+        await self.schedule_queue()
+
+    async def schedule_queue(self):
+        if self.closing or self.chat_runs:
+            return
+        async with self.queue_lock:
+            free_workers = [worker for worker in self.WORKER_IDS
+                            if worker not in self.active_workers.values()]
+            for worker_id in free_workers:
+                claimed = self.store.claim_next_orchestration(worker_id)
+                if claimed is None:
+                    break
+                run_id = claimed['run_id']
+                job = self.queue_jobs.get(run_id)
+                if job is None:
+                    # Credentials deliberately do not survive a process restart.
+                    self.store.set_orchestration_status(
+                        run_id, 'paused',
+                        'Kimlik bilgileri yeniden yüklenmeden görev sürdürülemez.')
+                    self.output(OrchestrationPaused(
+                        run_id=run_id, sequence=self._next_event_sequence(run_id),
+                        message='Görevi sürdürmek için yeniden başlatın.'))
+                    continue
+                sequence = self._next_event_sequence(run_id)
+                self.output(OrchestrationStarted(
+                    run_id=run_id, sequence=sequence, worker_id=worker_id))
+                self.active_workers[run_id] = worker_id
+                task = asyncio.create_task(self._run_queued_orchestration(
+                    SimpleNamespace(**claimed), job, sequence))
+                self.tasks[run_id] = task
+
+    async def _run_queued_orchestration(self, params, job, initial_sequence):
+        run_id = params.run_id
+        try:
+            await self.run_orchestration(
+                params, job['credentials'], resume=job['resume'],
+                initial_sequence=initial_sequence,
+                checkpoint_thread_id=job['checkpoint_thread_id'],
+                continue_checkpoint=job['continue_checkpoint'])
+        finally:
+            self.tasks.pop(run_id, None)
+            self.active_workers.pop(run_id, None)
+            self.queue_jobs.pop(run_id, None)
+            if not self.closing:
+                await self.schedule_queue()
 
     async def run_orchestration(self, params, credentials, *, resume=None, initial_sequence=0,
                                 checkpoint_thread_id=None, continue_checkpoint=False):
@@ -164,6 +244,9 @@ class ChatService:
             self.output(StreamError(run_id=params.run_id, sequence=sequence+1, full_content=content, message=message))
         finally:
             self.tasks.pop(params.run_id, None)
+            self.chat_runs.discard(params.run_id)
+            if not self.closing:
+                asyncio.create_task(self.schedule_queue())
 
     async def handle(self, raw: str, auth=None):
         try:
@@ -270,8 +353,8 @@ class ChatService:
             elif request.method == 'orchestration.history':
                 result = self.store.orchestration_history()
             elif request.method == 'orchestration.start':
-                if self.tasks or self.store.waiting_orchestration():
-                    raise ValueError('Önce devam eden yanıtı veya görevi durdurun.')
+                if self.store.queue_depth() >= self.MAX_QUEUED_ORCHESTRATIONS:
+                    raise ValueError('Görev kuyruğu kapasitesine ulaştı.')
                 params = request.params
                 credentials = auth.get('credentials', {}) if isinstance(auth, dict) else {}
                 if not isinstance(credentials, dict):
@@ -335,20 +418,10 @@ class ChatService:
                     estimated_max_cost_microusd=estimated_cost,
                     max_cost_microusd=params.max_cost_microusd,
                     price_catalog_version=CATALOG_VERSION))
-                task = asyncio.create_task(self.run_orchestration(params, credentials,
-                                                                  initial_sequence=1))
-                self.tasks[params.run_id] = task
-                def orchestration_finished(done):
-                    if done.cancelled():
-                        self.store.finish_orchestration(params.run_id, 'cancelled')
-                        self.output(OrchestrationEnd(run_id=params.run_id, sequence=1,
-                                                     status='cancelled'))
-                    self.tasks.pop(params.run_id, None)
-                task.add_done_callback(orchestration_finished)
+                self.store.set_event_sequence(params.run_id, 1)
+                await self.queue_orchestration(vars(params), credentials)
                 result = Accepted(run_id=params.run_id)
             elif request.method == 'orchestration.approve':
-                if self.tasks:
-                    raise ValueError('Önce devam eden yanıtı veya görevi durdurun.')
                 spec = self.store.orchestration_spec(request.params.run_id)
                 if spec is None:
                     raise ValueError('Çoklu ajan görevi bulunamadı.')
@@ -376,18 +449,14 @@ class ChatService:
                     return Success(request_id=request.request_id, result=result)
                 if spec['tool_status'] == 'waiting':
                     self.store.update_tool_action(params.run_id, 'approved')
-                self.store.set_orchestration_status(params.run_id, 'running')
-                task = asyncio.create_task(self.run_orchestration(
-                    params, credentials, resume=None if uncertain else request.params.decision,
-                    initial_sequence=spec['event_sequence'],
+                self.store.enqueue_orchestration(params.run_id, resumed=True)
+                spec = self.store.orchestration_spec(params.run_id)
+                await self.queue_orchestration(
+                    spec, credentials, resume=None if uncertain else request.params.decision,
                     checkpoint_thread_id=spec['parent_run_id'] or spec['run_id'],
-                    continue_checkpoint=uncertain))
-                self.tasks[params.run_id] = task
-                task.add_done_callback(lambda _: self.tasks.pop(params.run_id, None))
+                    continue_checkpoint=uncertain, resumed=True)
                 result = Accepted(run_id=params.run_id)
             elif request.method == 'orchestration.retry':
-                if self.tasks or self.store.waiting_orchestration():
-                    raise ValueError('Önce devam eden veya onay bekleyen görevi tamamlayın.')
                 source = self.store.retry_source(request.params.run_id)
                 credentials = auth.get('credentials', {}) if isinstance(auth, dict) else {}
                 if not isinstance(credentials, dict):
@@ -403,13 +472,37 @@ class ChatService:
                         has_knowledge=bool(source['knowledge_collection_ids']))
                 spec, checkpoint_thread_id = self.store.create_retry(
                     request.params.run_id, request.params.new_run_id)
-                params = SimpleNamespace(**spec)
-                task = asyncio.create_task(self.run_orchestration(
-                    params, credentials, checkpoint_thread_id=checkpoint_thread_id,
-                    continue_checkpoint=True))
-                self.tasks[params.run_id] = task
-                task.add_done_callback(lambda _: self.tasks.pop(params.run_id, None))
-                result = Accepted(run_id=params.run_id)
+                self.store.enqueue_orchestration(spec['run_id'], resumed=True)
+                spec = self.store.orchestration_spec(spec['run_id'])
+                await self.queue_orchestration(
+                    spec, credentials, checkpoint_thread_id=checkpoint_thread_id,
+                    continue_checkpoint=True, resumed=True)
+                result = Accepted(run_id=spec['run_id'])
+            elif request.method == 'orchestration.queue.resume':
+                spec = self.store.orchestration_spec(request.params.run_id)
+                if spec is None or spec['status'] != 'paused':
+                    raise ValueError('Yalnız duraklatılmış görev sürdürülebilir.')
+                credentials = auth.get('credentials', {}) if isinstance(auth, dict) else {}
+                if not isinstance(credentials, dict):
+                    raise ValueError('Kimlik bilgisi zarfı geçersiz.')
+                snapshot, agents = self.validate_orchestration_agents(
+                    spec['agent_ids'], credentials, spec['fallback_chain'])
+                validate_workflow_bindings(
+                    self.store, spec['workflow_id'], spec['workflow_version'],
+                    spec['agent_ids'], snapshot, require_active=False)
+                for agent in agents:
+                    validate_skill_requirements(
+                        self.store, agent, enabled_tools=spec['enabled_tools'],
+                        has_knowledge=bool(spec['knowledge_collection_ids']))
+                self.store.enqueue_orchestration(spec['run_id'], resumed=True)
+                spec = self.store.orchestration_spec(spec['run_id'])
+                checkpoint_thread_id = spec['parent_run_id'] or spec['run_id']
+                await self.queue_orchestration(
+                    spec, credentials,
+                    checkpoint_thread_id=checkpoint_thread_id,
+                    continue_checkpoint=self.checkpoint_exists(checkpoint_thread_id),
+                    resumed=True)
+                result = Accepted(run_id=spec['run_id'])
             elif request.method == 'orchestration.cancel':
                 task = self.tasks.get(request.params.run_id)
                 if task:
@@ -417,10 +510,12 @@ class ChatService:
                     await asyncio.gather(task, return_exceptions=True)
                 else:
                     spec = self.store.orchestration_spec(request.params.run_id)
-                    if spec and spec['status'] == 'waiting_approval':
+                    if spec and spec['status'] in ('queued', 'paused', 'waiting_approval'):
+                        self.queue_jobs.pop(request.params.run_id, None)
                         self.store.finish_orchestration(request.params.run_id, 'cancelled')
                         self.output(OrchestrationEnd(run_id=request.params.run_id,
-                                                     sequence=3, status='cancelled'))
+                            sequence=self._next_event_sequence(request.params.run_id),
+                            status='cancelled'))
                 result = Accepted(run_id=request.params.run_id)
             elif request.method == 'chat.start':
                 if self.tasks or self.store.waiting_orchestration():
@@ -458,6 +553,7 @@ class ChatService:
                 self.store.start_run(params.run_id, agent.id, params.message)
                 # No await after task creation: the acknowledgement is flushed before the first event.
                 self.tasks[params.run_id] = asyncio.create_task(self.reply(params, provider, messages, api_key))
+                self.chat_runs.add(params.run_id)
                 def finished(task):
                     # Cancellation before the coroutine's first step never enters reply's try/finally.
                     if task.cancelled():
@@ -483,10 +579,14 @@ class ChatService:
             return Failure(request_id=request.request_id, code='internal_error', message='Yerel istek tamamlanamadı.')
 
     async def close(self):
+        self.closing = True
+        orchestration_ids = [run_id for run_id in self.queue_jobs
+                             if run_id not in self.tasks or not self.tasks[run_id].done()]
         tasks = list(self.tasks.values())
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        self.store.pause_orchestrations(orchestration_ids, shutdown=True)
 
 
 async def serve(store):

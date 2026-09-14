@@ -36,6 +36,9 @@ test("orchestration and workspace responses are closed", () => {
         attempt: 1, parent_run_id: null, resumed_from_node: "", failed_node: "",
         error_class: "", cumulative_model_calls: 3, cumulative_cost_microusd: 0,
         fallback_chain: [["c1", "c2"], ["c3"]], model_call_attempts: [],
+        queue_sequence: 1, queue_position: null, worker_id: "",
+        queued_at: "2026-09-14T07:00:00Z", started_at: "2026-09-14T07:00:01Z",
+        resumed_at: null, finished_at: "2026-09-14T07:00:02Z",
         tool_action: null,
         status: "completed", error: "", messages: [
           { sequence: 1, agent_id: "a", phase: "analysis", content: "view" },
@@ -132,6 +135,18 @@ test("orchestration stream attributes every chunk", () => {
     run_id: "run", sequence: 5, agent_id: "a", phase: "analysis",
     from_connection_id: "c1", to_connection_id: "c2",
     message: "Fallback bağlantısına geçiliyor.", is_final: false }), true);
+});
+
+test("queue lifecycle events are typed and closed", () => {
+  assert.equal(validateEvent({ protocol_version: 1, type: "orchestration_queued",
+    run_id: "run", sequence: 2, queue_position: 1, resumed: true, is_final: false }), true);
+  assert.equal(validateEvent({ protocol_version: 1, type: "orchestration_started",
+    run_id: "run", sequence: 3, worker_id: "worker-1", is_final: false }), true);
+  assert.equal(validateEvent({ protocol_version: 1, type: "orchestration_paused",
+    run_id: "run", sequence: 4, message: "paused", is_final: false }), true);
+  assert.equal(validateEvent({ protocol_version: 1, type: "orchestration_queued",
+    run_id: "run", sequence: 2, queue_position: 1, resumed: true,
+    secret: "forbidden", is_final: false }), false);
 });
 
 test("knowledge progress is correlated, bounded and closed", () => {
