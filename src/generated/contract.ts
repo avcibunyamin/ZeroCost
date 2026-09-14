@@ -522,6 +522,14 @@ export type QueuedAt = string;
 export type StartedAt1 = string | null;
 export type ResumedAt = string | null;
 export type FinishedAt = string | null;
+export type Sequence = number;
+export type FromStatus =
+  "" | "queued" | "running" | "paused" | "waiting_approval" | "completed" | "cancelled" | "failed" | "interrupted";
+export type ToStatus =
+  "queued" | "running" | "paused" | "waiting_approval" | "completed" | "cancelled" | "failed" | "interrupted";
+export type Reason = string;
+export type Timestamp = string;
+export type StatusEvents = OrchestrationStatusEvent[];
 export type Tool = "workspace.write" | "terminal.execute" | "knowledge.search";
 export type Path7 = string;
 export type Command = string[];
@@ -537,12 +545,21 @@ export type Result1 = string;
 export type Status3 =
   "queued" | "running" | "paused" | "waiting_approval" | "completed" | "cancelled" | "failed" | "interrupted";
 export type Error1 = string;
-export type Sequence = number;
+export type Sequence1 = number;
 export type AgentId7 = string;
 export type Phase = "analysis" | "review" | "synthesis";
 export type Content2 = string;
 export type Messages = OrchestrationMessage[];
 export type Runs = OrchestrationRun[];
+export type WorkerLimit = number;
+export type WorkerId1 = string;
+export type RunId9 = string | null;
+export type Workers = WorkerSlot[];
+export type ConnectionId5 = string;
+export type HolderRunId = string | null;
+export type HolderWorkerId = string;
+export type WaitingRunIds = string[];
+export type Connections1 = ConnectionRuntime[];
 export type Version4 = string;
 export type Currency = "USD";
 export type Provider2 = "anthropic" | "gemini";
@@ -670,21 +687,21 @@ export type Event =
   | KnowledgeIngestionProgress;
 export type ProtocolVersion32 = 1;
 export type Type = "stream_chunk";
-export type RunId9 = string;
-export type Sequence1 = number;
+export type RunId10 = string;
+export type Sequence2 = number;
 export type Token = string;
 export type IsFinal = false;
 export type ProtocolVersion33 = 1;
 export type Type1 = "stream_end";
-export type RunId10 = string;
-export type Sequence2 = number;
+export type RunId11 = string;
+export type Sequence3 = number;
 export type FullContent = string;
 export type Status5 = "completed" | "cancelled";
 export type IsFinal1 = true;
 export type ProtocolVersion34 = 1;
 export type Type2 = "stream_error";
-export type RunId11 = string;
-export type Sequence3 = number;
+export type RunId12 = string;
+export type Sequence4 = number;
 export type FullContent1 = string;
 export type Message2 = string;
 export type IsFinal2 = true;
@@ -693,40 +710,40 @@ export type Type3 = "transport_error";
 export type Message3 = string;
 export type ProtocolVersion36 = 1;
 export type Type4 = "orchestration_chunk";
-export type RunId12 = string;
-export type Sequence4 = number;
+export type RunId13 = string;
+export type Sequence5 = number;
 export type AgentId8 = string;
 export type Phase1 = "analysis" | "review" | "synthesis";
 export type Token1 = string;
 export type IsFinal3 = false;
 export type ProtocolVersion37 = 1;
 export type Type5 = "orchestration_message_end";
-export type RunId13 = string;
-export type Sequence5 = number;
+export type RunId14 = string;
+export type Sequence6 = number;
 export type AgentId9 = string;
 export type Phase2 = "analysis" | "review" | "synthesis";
 export type FullContent2 = string;
 export type IsFinal4 = false;
 export type ProtocolVersion38 = 1;
 export type Type6 = "orchestration_end";
-export type RunId14 = string;
-export type Sequence6 = number;
+export type RunId15 = string;
+export type Sequence7 = number;
 export type Status6 = "completed" | "cancelled";
 export type IsFinal5 = true;
 export type ProtocolVersion39 = 1;
 export type Type7 = "orchestration_error";
-export type RunId15 = string;
-export type Sequence7 = number;
+export type RunId16 = string;
+export type Sequence8 = number;
 export type Message4 = string;
 export type ErrorClass1 = "retryable" | "permanent";
 export type FailedNode1 = string;
 export type IsFinal6 = true;
 export type ProtocolVersion40 = 1;
 export type Type8 = "orchestration_route";
-export type RunId16 = string;
-export type Sequence8 = number;
+export type RunId17 = string;
+export type Sequence9 = number;
 export type AgentIds2 = string[];
-export type Reason = string;
+export type Reason1 = string;
 export type PlannedModelCalls = number;
 export type MaxModelCalls4 = number;
 export type MaxOutputTokens4 = number;
@@ -736,8 +753,8 @@ export type PriceCatalogVersion1 = string;
 export type IsFinal7 = false;
 export type ProtocolVersion41 = 1;
 export type Type9 = "orchestration_approval_required";
-export type RunId17 = string;
-export type Sequence9 = number;
+export type RunId18 = string;
+export type Sequence10 = number;
 export type Permission = "workspace.read" | "workspace.write" | "terminal.execute";
 export type WorkspaceId8 = string;
 export type Paths = string[];
@@ -749,24 +766,24 @@ export type Risk1 = ("medium" | "high") | null;
 export type IsFinal8 = false;
 export type ProtocolVersion42 = 1;
 export type Type10 = "orchestration_usage";
-export type RunId18 = string;
-export type Sequence10 = number;
+export type RunId19 = string;
+export type Sequence11 = number;
 export type InputTokens2 = number;
 export type OutputTokens2 = number;
 export type ActualCostMicrousd1 = number;
 export type IsFinal9 = false;
 export type ProtocolVersion43 = 1;
 export type Type11 = "orchestration_tool_result";
-export type RunId19 = string;
-export type Sequence11 = number;
+export type RunId20 = string;
+export type Sequence12 = number;
 export type Tool2 = "workspace.write" | "terminal.execute" | "knowledge.search";
 export type Status7 = "completed" | "failed";
 export type Result2 = string;
 export type IsFinal10 = false;
 export type ProtocolVersion44 = 1;
 export type Type12 = "orchestration_retrying";
-export type RunId20 = string;
-export type Sequence12 = number;
+export type RunId21 = string;
+export type Sequence13 = number;
 export type AgentId10 = string;
 export type Phase3 = "analysis" | "review" | "synthesis";
 export type Attempt2 = number;
@@ -774,8 +791,8 @@ export type Message5 = string;
 export type IsFinal11 = false;
 export type ProtocolVersion45 = 1;
 export type Type13 = "orchestration_fallback";
-export type RunId21 = string;
-export type Sequence13 = number;
+export type RunId22 = string;
+export type Sequence14 = number;
 export type AgentId11 = string;
 export type Phase4 = "analysis" | "review" | "synthesis";
 export type FromConnectionId = string;
@@ -784,27 +801,27 @@ export type Message6 = string;
 export type IsFinal12 = false;
 export type ProtocolVersion46 = 1;
 export type Type14 = "orchestration_queued";
-export type RunId22 = string;
-export type Sequence14 = number;
+export type RunId23 = string;
+export type Sequence15 = number;
 export type QueuePosition1 = number;
 export type Resumed = boolean;
 export type IsFinal13 = false;
 export type ProtocolVersion47 = 1;
 export type Type15 = "orchestration_started";
-export type RunId23 = string;
-export type Sequence15 = number;
-export type WorkerId1 = string;
+export type RunId24 = string;
+export type Sequence16 = number;
+export type WorkerId2 = string;
 export type IsFinal14 = false;
 export type ProtocolVersion48 = 1;
 export type Type16 = "orchestration_paused";
-export type RunId24 = string;
-export type Sequence16 = number;
+export type RunId25 = string;
+export type Sequence17 = number;
 export type Message7 = string;
 export type IsFinal15 = false;
 export type ProtocolVersion49 = 1;
 export type Type17 = "knowledge_ingestion_progress";
 export type RequestId31 = string;
-export type Sequence17 = number;
+export type Sequence18 = number;
 export type CollectionId6 = string;
 export type WorkspaceId9 = string;
 export type Path10 = string;
@@ -1479,6 +1496,7 @@ export interface WorkspaceFile {
  */
 export interface OrchestrationHistory {
   runs: Runs;
+  runtime: OrchestrationRuntime;
 }
 /**
  * This interface was referenced by `Contract`'s JSON-Schema
@@ -1522,6 +1540,7 @@ export interface OrchestrationRun {
   started_at: StartedAt1;
   resumed_at: ResumedAt;
   finished_at: FinishedAt;
+  status_events: StatusEvents;
   tool_action: ToolAction | null;
   status: Status3;
   error: Error1;
@@ -1547,6 +1566,17 @@ export interface ModelCallAttempt {
 }
 /**
  * This interface was referenced by `Contract`'s JSON-Schema
+ * via the `definition` "OrchestrationStatusEvent".
+ */
+export interface OrchestrationStatusEvent {
+  sequence: Sequence;
+  from_status: FromStatus;
+  to_status: ToStatus;
+  reason: Reason;
+  timestamp: Timestamp;
+}
+/**
+ * This interface was referenced by `Contract`'s JSON-Schema
  * via the `definition` "ToolAction".
  */
 export interface ToolAction {
@@ -1568,10 +1598,37 @@ export interface ToolAction {
  * via the `definition` "OrchestrationMessage".
  */
 export interface OrchestrationMessage {
-  sequence: Sequence;
+  sequence: Sequence1;
   agent_id: AgentId7;
   phase: Phase;
   content: Content2;
+}
+/**
+ * This interface was referenced by `Contract`'s JSON-Schema
+ * via the `definition` "OrchestrationRuntime".
+ */
+export interface OrchestrationRuntime {
+  worker_limit: WorkerLimit;
+  workers: Workers;
+  connections: Connections1;
+}
+/**
+ * This interface was referenced by `Contract`'s JSON-Schema
+ * via the `definition` "WorkerSlot".
+ */
+export interface WorkerSlot {
+  worker_id: WorkerId1;
+  run_id: RunId9;
+}
+/**
+ * This interface was referenced by `Contract`'s JSON-Schema
+ * via the `definition` "ConnectionRuntime".
+ */
+export interface ConnectionRuntime {
+  connection_id: ConnectionId5;
+  holder_run_id: HolderRunId;
+  holder_worker_id: HolderWorkerId;
+  waiting_run_ids: WaitingRunIds;
 }
 /**
  * This interface was referenced by `Contract`'s JSON-Schema
@@ -1685,8 +1742,8 @@ export interface Failure {
 export interface StreamChunk {
   protocol_version: ProtocolVersion32;
   type: Type;
-  run_id: RunId9;
-  sequence: Sequence1;
+  run_id: RunId10;
+  sequence: Sequence2;
   token: Token;
   is_final: IsFinal;
 }
@@ -1697,8 +1754,8 @@ export interface StreamChunk {
 export interface StreamEnd {
   protocol_version: ProtocolVersion33;
   type: Type1;
-  run_id: RunId10;
-  sequence: Sequence2;
+  run_id: RunId11;
+  sequence: Sequence3;
   full_content: FullContent;
   status: Status5;
   is_final: IsFinal1;
@@ -1710,8 +1767,8 @@ export interface StreamEnd {
 export interface StreamError {
   protocol_version: ProtocolVersion34;
   type: Type2;
-  run_id: RunId11;
-  sequence: Sequence3;
+  run_id: RunId12;
+  sequence: Sequence4;
   full_content: FullContent1;
   message: Message2;
   is_final: IsFinal2;
@@ -1732,8 +1789,8 @@ export interface TransportError {
 export interface OrchestrationChunk {
   protocol_version: ProtocolVersion36;
   type: Type4;
-  run_id: RunId12;
-  sequence: Sequence4;
+  run_id: RunId13;
+  sequence: Sequence5;
   agent_id: AgentId8;
   phase: Phase1;
   token: Token1;
@@ -1746,8 +1803,8 @@ export interface OrchestrationChunk {
 export interface OrchestrationMessageEnd {
   protocol_version: ProtocolVersion37;
   type: Type5;
-  run_id: RunId13;
-  sequence: Sequence5;
+  run_id: RunId14;
+  sequence: Sequence6;
   agent_id: AgentId9;
   phase: Phase2;
   full_content: FullContent2;
@@ -1760,8 +1817,8 @@ export interface OrchestrationMessageEnd {
 export interface OrchestrationEnd {
   protocol_version: ProtocolVersion38;
   type: Type6;
-  run_id: RunId14;
-  sequence: Sequence6;
+  run_id: RunId15;
+  sequence: Sequence7;
   status: Status6;
   is_final: IsFinal5;
 }
@@ -1772,8 +1829,8 @@ export interface OrchestrationEnd {
 export interface OrchestrationError {
   protocol_version: ProtocolVersion39;
   type: Type7;
-  run_id: RunId15;
-  sequence: Sequence7;
+  run_id: RunId16;
+  sequence: Sequence8;
   message: Message4;
   error_class: ErrorClass1;
   failed_node: FailedNode1;
@@ -1786,10 +1843,10 @@ export interface OrchestrationError {
 export interface OrchestrationRoute {
   protocol_version: ProtocolVersion40;
   type: Type8;
-  run_id: RunId16;
-  sequence: Sequence8;
+  run_id: RunId17;
+  sequence: Sequence9;
   agent_ids: AgentIds2;
-  reason: Reason;
+  reason: Reason1;
   planned_model_calls: PlannedModelCalls;
   max_model_calls: MaxModelCalls4;
   max_output_tokens: MaxOutputTokens4;
@@ -1805,8 +1862,8 @@ export interface OrchestrationRoute {
 export interface OrchestrationApprovalRequired {
   protocol_version: ProtocolVersion41;
   type: Type9;
-  run_id: RunId17;
-  sequence: Sequence9;
+  run_id: RunId18;
+  sequence: Sequence10;
   permission: Permission;
   workspace_id: WorkspaceId8;
   paths: Paths;
@@ -1824,8 +1881,8 @@ export interface OrchestrationApprovalRequired {
 export interface OrchestrationUsage {
   protocol_version: ProtocolVersion42;
   type: Type10;
-  run_id: RunId18;
-  sequence: Sequence10;
+  run_id: RunId19;
+  sequence: Sequence11;
   input_tokens: InputTokens2;
   output_tokens: OutputTokens2;
   actual_cost_microusd: ActualCostMicrousd1;
@@ -1838,8 +1895,8 @@ export interface OrchestrationUsage {
 export interface OrchestrationToolResult {
   protocol_version: ProtocolVersion43;
   type: Type11;
-  run_id: RunId19;
-  sequence: Sequence11;
+  run_id: RunId20;
+  sequence: Sequence12;
   tool: Tool2;
   status: Status7;
   result: Result2;
@@ -1852,8 +1909,8 @@ export interface OrchestrationToolResult {
 export interface OrchestrationRetrying {
   protocol_version: ProtocolVersion44;
   type: Type12;
-  run_id: RunId20;
-  sequence: Sequence12;
+  run_id: RunId21;
+  sequence: Sequence13;
   agent_id: AgentId10;
   phase: Phase3;
   attempt: Attempt2;
@@ -1867,8 +1924,8 @@ export interface OrchestrationRetrying {
 export interface OrchestrationFallback {
   protocol_version: ProtocolVersion45;
   type: Type13;
-  run_id: RunId21;
-  sequence: Sequence13;
+  run_id: RunId22;
+  sequence: Sequence14;
   agent_id: AgentId11;
   phase: Phase4;
   from_connection_id: FromConnectionId;
@@ -1883,8 +1940,8 @@ export interface OrchestrationFallback {
 export interface OrchestrationQueued {
   protocol_version: ProtocolVersion46;
   type: Type14;
-  run_id: RunId22;
-  sequence: Sequence14;
+  run_id: RunId23;
+  sequence: Sequence15;
   queue_position: QueuePosition1;
   resumed: Resumed;
   is_final: IsFinal13;
@@ -1896,9 +1953,9 @@ export interface OrchestrationQueued {
 export interface OrchestrationStarted {
   protocol_version: ProtocolVersion47;
   type: Type15;
-  run_id: RunId23;
-  sequence: Sequence15;
-  worker_id: WorkerId1;
+  run_id: RunId24;
+  sequence: Sequence16;
+  worker_id: WorkerId2;
   is_final: IsFinal14;
 }
 /**
@@ -1908,8 +1965,8 @@ export interface OrchestrationStarted {
 export interface OrchestrationPaused {
   protocol_version: ProtocolVersion48;
   type: Type16;
-  run_id: RunId24;
-  sequence: Sequence16;
+  run_id: RunId25;
+  sequence: Sequence17;
   message: Message7;
   is_final: IsFinal15;
 }
@@ -1921,7 +1978,7 @@ export interface KnowledgeIngestionProgress {
   protocol_version: ProtocolVersion49;
   type: Type17;
   request_id: RequestId31;
-  sequence: Sequence17;
+  sequence: Sequence18;
   collection_id: CollectionId6;
   workspace_id: WorkspaceId9;
   path: Path10;

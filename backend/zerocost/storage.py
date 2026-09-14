@@ -11,7 +11,7 @@ from .models import (Agent, AgentInput, Connection, ConnectionInput, SkillPackag
                      SkillPackageInput, Snapshot, WorkflowSlotInput, WorkflowTemplate,
                      WorkflowTemplateInput, Workspace, WorkspaceInput)
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 
 class Store:
@@ -432,6 +432,29 @@ class Store:
             self.db.execute("PRAGMA legacy_alter_table=OFF")
             self.db.execute("PRAGMA foreign_keys=ON")
 
+        if current < 16:
+            with self.db:
+                self.db.execute("""CREATE TABLE IF NOT EXISTS orchestration_status_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL REFERENCES orchestration_runs(run_id) ON DELETE CASCADE,
+                    from_status TEXT NOT NULL,
+                    to_status TEXT NOT NULL,
+                    reason TEXT NOT NULL DEFAULT '',
+                    timestamp TEXT NOT NULL
+                )""")
+                self.db.execute("""CREATE INDEX IF NOT EXISTS orchestration_status_events_run
+                    ON orchestration_status_events(run_id,id)""")
+                self.db.execute("""INSERT INTO orchestration_status_events
+                    (run_id,from_status,to_status,reason,timestamp)
+                    SELECT r.run_id,'',r.status,'Şema v16 başlangıç durumu',
+                           strftime('%Y-%m-%dT%H:%M:%fZ',r.created_at)
+                    FROM orchestration_runs AS r
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM orchestration_status_events AS e
+                        WHERE e.run_id=r.run_id
+                    )""")
+                self.db.execute("PRAGMA user_version=16")
+
     def close(self):
         self.db.close()
 
@@ -751,7 +774,7 @@ class Store:
 
     def recover_runs(self):
         from .workspace_tools import current_write_hash
-        for row in self.db.execute("""SELECT run_id,tool_request,tool_content_hash
+        for row in self.db.execute("""SELECT run_id,status,tool_request,tool_content_hash
                 FROM orchestration_runs WHERE status IN ('running','queued') AND
                 tool_status='executing' AND tool_name='workspace.write'""").fetchall():
             try:
@@ -765,15 +788,22 @@ class Store:
                         tool_result='Hedef içerik hash ile doğrulandı; yazma yeniden uygulanmadı.',
                         error='Yazma tamamlandı; görev checkpoint üzerinden sürdürülebilir.'
                         WHERE run_id=?""", (row['run_id'],))
+                    self._record_status_event(
+                        row['run_id'], row['status'], 'waiting_approval',
+                        'Yazma tamamlandı; hash doğrulandı ve yeniden uygulanmadı.')
         with self.db:
             self.db.execute("UPDATE chat_runs SET status='interrupted',error='Uygulama bağlantısı kesildi.' WHERE status='running'")
+            uncertain = self.db.execute("""SELECT run_id,status FROM orchestration_runs
+                WHERE status IN ('running','queued') AND tool_status='executing'""").fetchall()
             self.db.execute("""UPDATE orchestration_runs SET status='waiting_approval',
                 tool_status='uncertain',error_class='uncertain_tool',
                 error='Araç çalıştırılırken bağlantı kesildi; sonuç belirsiz.'
                 WHERE status IN ('running','queued') AND tool_status='executing'""")
-            self.db.execute("""UPDATE orchestration_runs SET status='paused',worker_id='',
-                error='Uygulama kapandı; görev kullanıcı tarafından sürdürülebilir.'
-                WHERE status IN ('running','queued')""")
+            for row in uncertain:
+                self._record_status_event(
+                    row['run_id'], row['status'], 'waiting_approval',
+                    'Araç çalıştırılırken bağlantı kesildi; sonuç belirsiz.')
+        self.pause_orchestrations()
 
     def start_orchestration(self, run_id: str, objective: str, rounds: int, agent_ids: list[str],
                             *, routing_mode: str = 'manual', route_reason: str = '',
@@ -807,6 +837,16 @@ class Store:
                  queue_sequence))
             self.db.executemany("INSERT INTO orchestration_participants VALUES (?,?,?)",
                                 [(run_id, agent_id, position) for position, agent_id in enumerate(agent_ids)])
+            self._record_status_event(run_id, '', 'queued', 'Görev kuyruğa alındı.')
+
+    def _record_status_event(self, run_id: str, from_status: str, to_status: str,
+                             reason: str):
+        if from_status == to_status:
+            return
+        self.db.execute("""INSERT INTO orchestration_status_events
+            (run_id,from_status,to_status,reason,timestamp)
+            VALUES (?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))""",
+            (run_id, from_status, to_status, reason[:1000]))
 
     def append_orchestration_message(self, run_id: str, sequence: int, agent_id: str,
                                      phase: str, content: str):
@@ -817,28 +857,49 @@ class Store:
     def finish_orchestration(self, run_id: str, status: str, error: str = "",
                              error_class: str = '', failed_node: str = ''):
         with self.db:
+            row = self.db.execute(
+                "SELECT status FROM orchestration_runs WHERE run_id=?", (run_id,)).fetchone()
             self.db.execute("""UPDATE orchestration_runs SET status=?,error=?,
                 error_class=?,failed_node=?,worker_id='',finished_at=CURRENT_TIMESTAMP
                 WHERE run_id=?""",
                 (status, error, error_class, failed_node, run_id))
+            if row:
+                reason = error or {
+                    'completed': 'Görev tamamlandı.', 'cancelled': 'Görev iptal edildi.',
+                    'failed': 'Görev başarısız oldu.', 'interrupted': 'Görev kesildi.',
+                }.get(status, 'Görev durumu değişti.')
+                self._record_status_event(run_id, row['status'], status, reason)
 
     def set_orchestration_status(self, run_id: str, status: str, error: str = ""):
         if status in ('completed', 'cancelled', 'failed', 'interrupted'):
             self.finish_orchestration(run_id, status, error)
             return
         with self.db:
+            row = self.db.execute(
+                "SELECT status FROM orchestration_runs WHERE run_id=?", (run_id,)).fetchone()
             self.db.execute("""UPDATE orchestration_runs SET status=?,error=?,
                 error_class='',failed_node='',worker_id=CASE WHEN ?='running' THEN worker_id ELSE '' END
                 WHERE run_id=?""", (status, error, status, run_id))
+            if row:
+                reason = error or {
+                    'waiting_approval': 'Görev kullanıcı onayı bekliyor.',
+                    'paused': 'Görev duraklatıldı.', 'running': 'Görev yürütülüyor.',
+                    'queued': 'Görev kuyruğa alındı.',
+                }.get(status, 'Görev durumu değişti.')
+                self._record_status_event(run_id, row['status'], status, reason)
 
     def enqueue_orchestration(self, run_id: str, *, resumed: bool = False):
         spec = self.orchestration_spec(run_id)
         if spec is None or spec['status'] not in ('queued', 'paused', 'waiting_approval'):
             raise ValueError('Bu görev kuyruğa alınamaz.')
         with self.db:
+            from_status = spec['status']
             self.db.execute("""UPDATE orchestration_runs SET status='queued',worker_id='',
                 resumed_at=CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE resumed_at END,
                 error='' WHERE run_id=?""", (1 if resumed else 0, run_id))
+            self._record_status_event(
+                run_id, from_status, 'queued',
+                'Görev kullanıcı tarafından sürdürüldü.' if resumed else 'Görev kuyruğa alındı.')
         return self.queue_position(run_id)
 
     def queue_position(self, run_id: str):
@@ -862,6 +923,8 @@ class Store:
             self.db.execute("""UPDATE orchestration_runs SET status='running',worker_id=?,
                 started_at=COALESCE(started_at,CURRENT_TIMESTAMP) WHERE run_id=?""",
                 (worker_id, row['run_id']))
+            self._record_status_event(
+                row['run_id'], 'queued', 'running', f'{worker_id} görevi aldı.')
         return self.orchestration_spec(row['run_id'])
 
     def pause_orchestrations(self, run_ids: list[str] | None = None, *, shutdown=False):
@@ -874,9 +937,15 @@ class Store:
             clauses += f" AND run_id IN ({','.join('?' for _ in run_ids)})"
             values.extend(run_ids)
         with self.db:
+            rows = self.db.execute(
+                f"SELECT run_id,status FROM orchestration_runs WHERE {clauses}", values).fetchall()
             self.db.execute(f"""UPDATE orchestration_runs SET status='paused',worker_id='',
                 error='Uygulama kapandı; görev kullanıcı tarafından sürdürülebilir.'
                 WHERE {clauses}""", values)
+            for row in rows:
+                self._record_status_event(
+                    row['run_id'], row['status'], 'paused',
+                    'Uygulama kapandı; görev kullanıcı tarafından sürdürülebilir.')
 
     def increment_model_calls(self, run_id: str):
         spec = self.orchestration_spec(run_id)
@@ -1015,7 +1084,7 @@ class Store:
 
     def orchestration_history(self):
         from .models import (ModelCallAttempt, OrchestrationHistory, OrchestrationMessage,
-                             OrchestrationRun, ToolAction)
+                             OrchestrationRun, OrchestrationStatusEvent, ToolAction)
         runs = []
         rows = self.db.execute("SELECT * FROM orchestration_runs ORDER BY created_at DESC,rowid DESC LIMIT 100")
         for row in rows:
@@ -1040,6 +1109,12 @@ class Store:
             attempts = [ModelCallAttempt(**dict(item)) for item in self.db.execute(
                 """SELECT * FROM model_call_attempts WHERE run_id=?
                 ORDER BY started_at,rowid""", (row['run_id'],))]
+            status_events = [OrchestrationStatusEvent(
+                sequence=item['id'], from_status=item['from_status'],
+                to_status=item['to_status'], reason=item['reason'], timestamp=item['timestamp'])
+                for item in self.db.execute("""SELECT id,from_status,to_status,reason,timestamp
+                    FROM orchestration_status_events WHERE run_id=? ORDER BY id""",
+                    (row['run_id'],))]
             queue_position = self.queue_position(row['run_id'])
             runs.append(OrchestrationRun(run_id=row['run_id'], objective=row['objective'], rounds=row['rounds'],
                                          status=row['status'], error=row['error'], agent_ids=agent_ids,
@@ -1070,5 +1145,6 @@ class Store:
                                          worker_id=row['worker_id'], queued_at=row['queued_at'],
                                          started_at=row['started_at'], resumed_at=row['resumed_at'],
                                          finished_at=row['finished_at'],
+                                         status_events=status_events,
                                          tool_action=tool_action, messages=messages))
         return OrchestrationHistory(runs=runs)

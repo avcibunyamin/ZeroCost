@@ -143,6 +143,14 @@ API anahtarları kuyruk tablosuna veya checkpoint'e yazılmaz; yalnız sidecar b
 
 Orkestrasyon token olayları 25 ms veya 256 karakter eşiğinde gruplanır. Tamamlanma, hata, iptal, retry, fallback, onay ve worker bırakma öncesinde tampon zorunlu olarak boşaltılır. Kararlar [ADR-0005](docs/adr/0005-persistent-task-queue.md) içinde kayıtlıdır.
 
+## Kuyruk gözlemlenebilirliği
+
+SQLite şema v16 her görev durum geçişini önceki durum, yeni durum, somut neden ve zaman damgasıyla `orchestration_status_events` tablosuna ekler. Eski çalışmalar migration sırasında tek bir başlangıç olayı kazanır. Görev ayrıntısındaki zaman çizelgesi; kuyruğa giriş, worker ataması, onay bekleme, sürdürme, kapanma ve hata geçişlerini kalıcı sırada gösterir.
+
+`orchestration.history` yanıtı ayrıca süreç belleğinden iki worker slotunu ve bağlantı semaphore durumunu taşır. Kuyruk kartı mevcut durumda geçen süreyi ve darboğazı açıklar: bütün worker'ların dolu olması, kullanıcı onayı veya belirli bağlantının hangi worker tarafından kullanıldığı. Bu runtime snapshot API anahtarı, prompt, araç argümanı ya da model çıktısı içermez. Canlı görev varken arayüz iki saniyede bir yenilenir; tamamlanan geçmiş durum ve son gün aralığına göre aynı Ajan masası içinde filtrelenir.
+
+V1 bilinçli olarak ETA üretmez. Değişken görev uzunluğu, onay beklemeleri, retry ve fallback için yeterli ölçüm geçmişi oluşmadan gösterilecek tahmin güvenilir olmayacaktır. Ayrı operasyon paneli ve run ailesi görselleştirmesi de sonraki dilimlere bırakılmıştır. Kapsam kararı [ADR-0006](docs/adr/0006-queue-observability-v1.md) içinde kayıtlıdır.
+
 ## Pydantic → TypeScript sözleşmesi
 
 Tek kaynak `backend/zerocost/models.py` dosyasıdır.
@@ -192,6 +200,6 @@ macOS uygulaması `src-tauri/target/release/bundle/macos/ZeroCost.app` altında 
 ## Sonraki geliştirme dilimi
 
 1. Workflow tarifleri için çalıştırma geçmişi filtresi, kopyalama ve açık sürüm karşılaştırması.
-2. Kuyruk kapasitesi ve bağlantı bekleme süreleri için ölçüm/observability paneli.
+2. Durum olaylarından kuyruk/bağlantı ölçümleri ve doğrulanmış hata sınırıyla ETA araştırması.
 3. Ayrı bir dilimde görsel graph editörü ve topoloji doğrulaması.
 4. Üçüncü taraf plugin manifesti, imza doğrulaması ve sandbox sınırı.

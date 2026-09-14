@@ -39,11 +39,25 @@ test("orchestration and workspace responses are closed", () => {
         queue_sequence: 1, queue_position: null, worker_id: "",
         queued_at: "2026-09-14T07:00:00Z", started_at: "2026-09-14T07:00:01Z",
         resumed_at: null, finished_at: "2026-09-14T07:00:02Z",
+        status_events: [
+          { sequence: 1, from_status: "", to_status: "queued",
+            reason: "Görev kuyruğa alındı.", timestamp: "2026-09-14T07:00:00Z" },
+          { sequence: 2, from_status: "queued", to_status: "running",
+            reason: "worker-1 görevi aldı.", timestamp: "2026-09-14T07:00:01Z" },
+          { sequence: 3, from_status: "running", to_status: "completed",
+            reason: "Görev tamamlandı.", timestamp: "2026-09-14T07:00:02Z" },
+        ],
         tool_action: null,
         status: "completed", error: "", messages: [
           { sequence: 1, agent_id: "a", phase: "analysis", content: "view" },
         ],
       }],
+      runtime: {
+        worker_limit: 2,
+        workers: [{ worker_id: "worker-1", run_id: null },
+          { worker_id: "worker-2", run_id: null }],
+        connections: [],
+      },
     },
   };
   assert.equal(validate(history), true);

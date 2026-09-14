@@ -5,6 +5,7 @@ import { desktopAvailable, rpc } from "./api";
 import validateEvent from "./generated/validate-event.js";
 import type {
   OrchestrationMessage,
+  OrchestrationRuntime,
   OrchestrationRun,
   OrchestrationStartInput,
   KnowledgeCollection,
@@ -12,6 +13,38 @@ import type {
   Snapshot,
   WorkflowTemplate,
 } from "./generated/contract";
+
+type RunStatus = OrchestrationRun["status"];
+type HistoryRange = "all" | "today" | "7d" | "30d";
+
+const STATUS_LABELS: Record<RunStatus, string> = {
+  queued: "Kuyrukta",
+  running: "Çalışıyor",
+  paused: "Duraklatıldı",
+  waiting_approval: "Onay bekliyor",
+  completed: "Tamamlandı",
+  cancelled: "İptal edildi",
+  failed: "Başarısız",
+  interrupted: "Kesildi",
+};
+
+function parseTimestamp(value: string | null | undefined) {
+  if (!value) return null;
+  const normalized = /(?:Z|[+-]\d\d:\d\d)$/.test(value) ? value : `${value.replace(" ", "T")}Z`;
+  const timestamp = Date.parse(normalized);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function elapsedLabel(start: string | null | undefined, now: number) {
+  const timestamp = parseTimestamp(start);
+  if (timestamp === null) return "Süre bilinmiyor";
+  const seconds = Math.max(0, Math.floor((now - timestamp) / 1000));
+  if (seconds < 60) return `${seconds} sn`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} dk ${seconds % 60} sn`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} sa ${minutes % 60} dk`;
+}
 
 type StreamingMessage = {
   run_id: string;
@@ -48,6 +81,14 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
   const [knowledgeCollections, setKnowledgeCollections] = useState<KnowledgeCollection[]>([]);
   const [selectedKnowledge, setSelectedKnowledge] = useState<string[]>([]);
   const [runs, setRuns] = useState<OrchestrationRun[]>([]);
+  const [runtime, setRuntime] = useState<OrchestrationRuntime>({
+    worker_limit: 2,
+    workers: [],
+    connections: [],
+  });
+  const [historyStatus, setHistoryStatus] = useState<"all" | RunStatus>("all");
+  const [historyRange, setHistoryRange] = useState<HistoryRange>("all");
+  const [clock, setClock] = useState(() => Date.now());
   const [catalog, setCatalog] = useState<PricingCatalog | null>(null);
   const [streaming, setStreaming] = useState<Record<string, StreamingMessage>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -66,6 +107,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
     const result = await rpc({ method: "orchestration.history" });
     if (!("runs" in result)) throw new Error("Görev geçmişi alınamadı.");
     setRuns(result.runs);
+    setRuntime(result.runtime);
     setFocusedRunId((current) => current && result.runs.some((run) => run.run_id === current)
       ? current : result.runs[0]?.run_id ?? null);
     const pending = result.runs.find((run) =>
@@ -105,6 +147,16 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
         .catch((e) => setError(String(e)));
     }
   }, []);
+  const hasLiveRuns = runs.some((run) =>
+    ["queued", "running", "waiting_approval"].includes(run.status));
+  useEffect(() => {
+    if (!desktopAvailable || !hasLiveRuns) return;
+    const interval = window.setInterval(() => {
+      setClock(Date.now());
+      void refresh().catch((e) => setError(String(e)));
+    }, 2000);
+    return () => window.clearInterval(interval);
+  }, [hasLiveRuns]);
   useEffect(() => {
     if (!workflowId && selected.length < 2 && (snapshot?.agents.length ?? 0) >= 2)
       setSelected(snapshot!.agents.slice(0, 2).map((agent) => agent.id));
@@ -348,6 +400,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       started_at: null,
       resumed_at: null,
       finished_at: null,
+      status_events: [],
       messages: [],
     };
     runId.current = id;
@@ -479,6 +532,16 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
   const active = !!current && ["queued", "running", "waiting_approval"].includes(current.status);
   const queueRuns = runs.filter((run) =>
     ["queued", "running", "paused", "waiting_approval"].includes(run.status));
+  const filteredRuns = runs.filter((run) => {
+    if (historyStatus !== "all" && run.status !== historyStatus) return false;
+    if (historyRange === "all") return true;
+    const started = parseTimestamp(run.queued_at) ?? 0;
+    const now = new Date(clock);
+    const cutoff = historyRange === "today"
+      ? new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+      : clock - Number.parseInt(historyRange, 10) * 24 * 60 * 60 * 1000;
+    return started >= cutoff;
+  });
   const currentWorkflow = current?.workflow_id
     ? snapshot?.workflows.find((item) => item.id === current.workflow_id)
     : undefined;
@@ -524,6 +587,30 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
   );
   const missingWorkflowWorkspace = !!workflow && effectiveTools.length > 0 && !workspaceId;
   const missingWorkflowKnowledge = workflowNeedsKnowledge && selectedKnowledge.length === 0;
+  function statusSince(run: OrchestrationRun) {
+    const latest = [...run.status_events].reverse().find((event) => event.to_status === run.status);
+    return latest?.timestamp ?? (run.status === "queued" ? run.queued_at
+      : run.status === "running" ? run.started_at : run.finished_at ?? run.queued_at);
+  }
+  function bottleneck(run: OrchestrationRun) {
+    const connection = runtime.connections.find((item) => item.waiting_run_ids.includes(run.run_id));
+    if (connection) {
+      const label = snapshot?.connections.find((item) => item.id === connection.connection_id)?.name
+        ?? "Model";
+      const holder = connection.holder_worker_id || "başka bir görev";
+      return `${label} bağlantısı ${holder} tarafından kullanılıyor.`;
+    }
+    if (run.status === "queued") {
+      if (run.resumed_at) return "Devam eden görev ilk boş worker’ı bekliyor.";
+      const busy = runtime.workers.filter((worker) => worker.run_id).length;
+      return busy >= runtime.worker_limit
+        ? `${runtime.worker_limit} worker da kullanımda; sırada ${run.queue_position ?? "–"} görev var.`
+        : `Worker atanmayı bekliyor; sırada ${run.queue_position ?? "–"} görev var.`;
+    }
+    if (run.status === "running") return `${run.worker_id || "Worker"} üzerinde çalışıyor.`;
+    if (run.status === "waiting_approval") return "Kullanıcı onayı bekleniyor; worker slotu serbest.";
+    return "Uygulama yeniden başlatıldı; açıkça sürdürülmesi gerekiyor.";
+  }
   return (
     <>
       <div className="page-heading">
@@ -826,16 +913,44 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
                 key={run.run_id}>
                 <button type="button" className="task-queue-main" onClick={() => focusRun(run)}>
                   <span>{run.objective}</span>
-                  <small>{run.status === "queued" ? `Kuyruk #${run.queue_position ?? "–"}` :
-                    run.status === "running" ? `${run.worker_id} çalışıyor` :
-                    run.status === "waiting_approval" ? "Onay bekliyor · worker boşta" :
-                    "Uygulama yeniden başlatıldı · duraklatıldı"}</small>
+                  <small>{STATUS_LABELS[run.status]} · {elapsedLabel(statusSince(run), clock)}</small>
+                  <small className="task-bottleneck">{bottleneck(run)}</small>
                 </button>
                 {run.status === "paused" ? <button type="button" className="button secondary"
                   onClick={() => void resume(run)} disabled={stopping}>Sürdür</button>
                   : <button type="button" className="icon-button danger" title="Görevi iptal et"
                     onClick={() => void cancel(run.run_id)} disabled={stopping}><Square size={13} /></button>}
               </div>)}
+          </div>}
+          {!!runs.length && <div className="run-history">
+            <div className="run-history-heading">
+              <strong>Görev geçmişi</strong>
+              <div>
+                <select aria-label="Duruma göre filtrele" value={historyStatus}
+                  onChange={(event) => setHistoryStatus(event.target.value as "all" | RunStatus)}>
+                  <option value="all">Tüm durumlar</option>
+                  {Object.entries(STATUS_LABELS).map(([status, label]) =>
+                    <option key={status} value={status}>{label}</option>)}
+                </select>
+                <select aria-label="Tarihe göre filtrele" value={historyRange}
+                  onChange={(event) => setHistoryRange(event.target.value as HistoryRange)}>
+                  <option value="all">Tüm tarihler</option>
+                  <option value="today">Bugün</option>
+                  <option value="7d">Son 7 gün</option>
+                  <option value="30d">Son 30 gün</option>
+                </select>
+              </div>
+            </div>
+            <div className="run-history-list">
+              {filteredRuns.map((run) => <button type="button" key={run.run_id}
+                className={run.run_id === current?.run_id ? "selected" : ""}
+                onClick={() => focusRun(run)}>
+                <span>{run.objective}</span>
+                <small>{STATUS_LABELS[run.status]} · {new Date(
+                  parseTimestamp(run.queued_at) ?? 0).toLocaleString("tr-TR")}</small>
+              </button>)}
+              {!filteredRuns.length && <small>Bu filtrelerle eşleşen görev yok.</small>}
+            </div>
           </div>}
           <div className="panel-heading">
             <div>
@@ -864,6 +979,17 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
             </div>
             {active && <LoaderCircle className="spin" size={19} />}
           </div>
+          {!!current?.status_events.length && <div className="status-timeline">
+            <strong>Durum zaman çizelgesi</strong>
+            {current.status_events.map((event) => <div key={event.sequence}>
+              <i aria-hidden="true" />
+              <span>
+                <b>{STATUS_LABELS[event.to_status]}</b>
+                <small>{event.reason} · {new Date(
+                  parseTimestamp(event.timestamp) ?? 0).toLocaleString("tr-TR")}</small>
+              </span>
+            </div>)}
+          </div>}
           {!messages.length && (
             <div className="empty">
               <div className="empty-icon">

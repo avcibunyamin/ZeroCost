@@ -66,10 +66,51 @@ class OrchestrationEngine:
         self.knowledge_search = HybridKnowledgeSearch(store, embedding_factory)
         self.event_sequences: dict[str, int] = {}
         self.connection_semaphores: dict[str, asyncio.Semaphore] = {}
+        self.connection_holders: dict[str, str] = {}
+        self.connection_waiters: dict[str, list[str]] = {}
 
     def _record_sequence(self, run_id: str, sequence: int):
         self.event_sequences[run_id] = sequence
         self.store.set_event_sequence(run_id, sequence)
+
+    @asynccontextmanager
+    async def connection_slot(self, connection_id: str, run_id: str):
+        waiters = self.connection_waiters.setdefault(connection_id, [])
+        if run_id not in waiters:
+            waiters.append(run_id)
+        semaphore = self.connection_semaphores.setdefault(
+            connection_id, asyncio.Semaphore(1))
+        try:
+            async with semaphore:
+                if run_id in waiters:
+                    waiters.remove(run_id)
+                self.connection_holders[connection_id] = run_id
+                try:
+                    yield
+                finally:
+                    if self.connection_holders.get(connection_id) == run_id:
+                        self.connection_holders.pop(connection_id, None)
+        finally:
+            if run_id in waiters:
+                waiters.remove(run_id)
+            if not waiters:
+                self.connection_waiters.pop(connection_id, None)
+
+    def runtime_snapshot(self, active_workers):
+        from .models import ConnectionRuntime, OrchestrationRuntime, WorkerSlot
+        connection_ids = sorted(set(self.connection_holders) | set(self.connection_waiters))
+        return OrchestrationRuntime(
+            worker_limit=2,
+            workers=[WorkerSlot(worker_id=worker, run_id=next(
+                (run_id for run_id, assigned in active_workers.items() if assigned == worker), None))
+                for worker in ('worker-1', 'worker-2')],
+            connections=[ConnectionRuntime(
+                connection_id=connection_id,
+                holder_run_id=self.connection_holders.get(connection_id),
+                holder_worker_id=active_workers.get(
+                    self.connection_holders.get(connection_id, ''), ''),
+                waiting_run_ids=list(self.connection_waiters.get(connection_id, [])))
+                for connection_id in connection_ids])
 
     def _agent_connection(self, agent_id: str):
         snapshot = self.store.snapshot()
@@ -243,9 +284,7 @@ class OrchestrationEngine:
                         await buffer_token(token)
 
                 error = None
-                semaphore = self.connection_semaphores.setdefault(
-                    connection.id, asyncio.Semaphore(1))
-                async with semaphore:
+                async with self.connection_slot(connection.id, run_id):
                     # Waiting for a connection slot consumes neither call nor cost budget.
                     provider = self.provider_factory(connection.provider, connection.model_id)
                     started_at = datetime.now(timezone.utc).isoformat()

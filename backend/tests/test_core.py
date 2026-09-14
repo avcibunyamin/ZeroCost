@@ -185,7 +185,7 @@ def test_v4_orchestration_migrates_with_budget_defaults(tmp_path):
 
     migrated = Store(path)
     run = migrated.orchestration_history().runs[0]
-    assert migrated.snapshot().database_version == 15
+    assert migrated.snapshot().database_version == 16
     assert run.routing_mode == 'manual' and run.max_model_calls == 5
     assert run.agent_ids == [a.id for a in agents]
     assert migrated.db.execute('PRAGMA foreign_key_check').fetchall() == []
@@ -345,7 +345,7 @@ def test_v8_knowledge_data_migrates_to_versioned_hash_cache(tmp_path):
 
     migrated = Store(path)
     source = migrated.knowledge_source_hash(collection_id, workspace.id, 'legacy.md')
-    assert migrated.snapshot().database_version == 15
+    assert migrated.snapshot().database_version == 16
     assert source == {'content_hash': 'old-hash', 'status': 'ready', 'index_version': 'legacy-v8'}
     assert migrated.search_knowledge_fts(collection_id, 'korunan')[0]['content'] == 'korunan içerik'
     assert migrated.db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
@@ -1478,6 +1478,24 @@ def test_persistent_queue_uses_two_workers_and_queued_cancel_has_no_model_call(t
         assert {states['queue-1'].status, states['queue-2'].status} == {'running'}
         assert states['queue-3'].status == 'queued' and states['queue-3'].queue_position == 1
         assert {states['queue-1'].worker_id, states['queue-2'].worker_id} == {'worker-1', 'worker-2'}
+        runtime = None
+        for _ in range(100):
+            history_response = await service.handle(request('orchestration.history'))
+            assert history_response.ok
+            runtime = history_response.result.runtime
+            if runtime.connections and runtime.connections[0].waiting_run_ids:
+                break
+            await asyncio.sleep(.01)
+        assert runtime is not None
+        assert runtime.worker_limit == 2
+        assert {worker.run_id for worker in runtime.workers} == {'queue-1', 'queue-2'}
+        assert runtime.connections
+        connection_runtime = runtime.connections[0]
+        assert connection_runtime.connection_id == connection.id
+        assert connection_runtime.holder_run_id in {'queue-1', 'queue-2'}
+        assert connection_runtime.holder_worker_id in {'worker-1', 'worker-2'}
+        assert set(connection_runtime.waiting_run_ids) == (
+            {'queue-1', 'queue-2'} - {connection_runtime.holder_run_id})
 
         cancelled = await service.handle(request('orchestration.cancel', run_id='queue-3'))
         assert cancelled.ok
@@ -1489,6 +1507,32 @@ def test_persistent_queue_uses_two_workers_and_queued_cancel_has_no_model_call(t
         await service.close()
         store.close()
     asyncio.run(scenario())
+
+
+def test_orchestration_status_timeline_is_ordered_and_cascades(tmp_path):
+    store = Store(tmp_path / 'status-events.sqlite3')
+    store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+    connection = store.snapshot().connections[0]
+    for name in ('A', 'B'):
+        store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+    agent_ids = [agent.id for agent in store.snapshot().agents]
+    store.start_orchestration('timeline', 'observe', 1, agent_ids)
+    store.claim_next_orchestration('worker-1')
+    store.set_orchestration_status('timeline', 'waiting_approval')
+    store.enqueue_orchestration('timeline', resumed=True)
+    store.claim_next_orchestration('worker-2')
+    store.finish_orchestration('timeline', 'completed')
+    run = store.orchestration_history().runs[0]
+    assert [event.to_status for event in run.status_events] == [
+        'queued', 'running', 'waiting_approval', 'queued', 'running', 'completed']
+    assert all(event.reason for event in run.status_events)
+    assert [event.sequence for event in run.status_events] == sorted(
+        event.sequence for event in run.status_events)
+    store.db.execute("DELETE FROM orchestration_runs WHERE run_id='timeline'")
+    store.db.commit()
+    assert store.db.execute("""SELECT COUNT(*) FROM orchestration_status_events
+        WHERE run_id='timeline'""").fetchone()[0] == 0
+    store.close()
 
 
 def test_two_workers_run_different_connections_concurrently(tmp_path):

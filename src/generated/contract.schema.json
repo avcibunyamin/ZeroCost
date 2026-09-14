@@ -549,6 +549,47 @@
       "title": "ConnectionRequest",
       "type": "object"
     },
+    "ConnectionRuntime": {
+      "additionalProperties": false,
+      "properties": {
+        "connection_id": {
+          "title": "Connection Id",
+          "type": "string"
+        },
+        "holder_run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Holder Run Id"
+        },
+        "holder_worker_id": {
+          "default": "",
+          "title": "Holder Worker Id",
+          "type": "string"
+        },
+        "waiting_run_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Waiting Run Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "connection_id",
+        "holder_run_id",
+        "holder_worker_id",
+        "waiting_run_ids"
+      ],
+      "title": "ConnectionRuntime",
+      "type": "object"
+    },
     "EmbeddingModel": {
       "additionalProperties": false,
       "properties": {
@@ -1837,10 +1878,14 @@
           },
           "title": "Runs",
           "type": "array"
+        },
+        "runtime": {
+          "$ref": "#/$defs/OrchestrationRuntime"
         }
       },
       "required": [
-        "runs"
+        "runs",
+        "runtime"
       ],
       "title": "OrchestrationHistory",
       "type": "object"
@@ -2543,6 +2588,13 @@
           ],
           "title": "Finished At"
         },
+        "status_events": {
+          "items": {
+            "$ref": "#/$defs/OrchestrationStatusEvent"
+          },
+          "title": "Status Events",
+          "type": "array"
+        },
         "tool_action": {
           "anyOf": [
             {
@@ -2617,12 +2669,44 @@
         "started_at",
         "resumed_at",
         "finished_at",
+        "status_events",
         "tool_action",
         "status",
         "error",
         "messages"
       ],
       "title": "OrchestrationRun",
+      "type": "object"
+    },
+    "OrchestrationRuntime": {
+      "additionalProperties": false,
+      "properties": {
+        "worker_limit": {
+          "default": 2,
+          "title": "Worker Limit",
+          "type": "integer"
+        },
+        "workers": {
+          "items": {
+            "$ref": "#/$defs/WorkerSlot"
+          },
+          "title": "Workers",
+          "type": "array"
+        },
+        "connections": {
+          "items": {
+            "$ref": "#/$defs/ConnectionRuntime"
+          },
+          "title": "Connections",
+          "type": "array"
+        }
+      },
+      "required": [
+        "worker_limit",
+        "workers",
+        "connections"
+      ],
+      "title": "OrchestrationRuntime",
       "type": "object"
     },
     "OrchestrationStartInput": {
@@ -2858,6 +2942,61 @@
         "is_final"
       ],
       "title": "OrchestrationStarted",
+      "type": "object"
+    },
+    "OrchestrationStatusEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "from_status": {
+          "enum": [
+            "",
+            "queued",
+            "running",
+            "paused",
+            "waiting_approval",
+            "completed",
+            "cancelled",
+            "failed",
+            "interrupted"
+          ],
+          "title": "From Status",
+          "type": "string"
+        },
+        "to_status": {
+          "enum": [
+            "queued",
+            "running",
+            "paused",
+            "waiting_approval",
+            "completed",
+            "cancelled",
+            "failed",
+            "interrupted"
+          ],
+          "title": "To Status",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "timestamp": {
+          "title": "Timestamp",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sequence",
+        "from_status",
+        "to_status",
+        "reason",
+        "timestamp"
+      ],
+      "title": "OrchestrationStatusEvent",
       "type": "object"
     },
     "OrchestrationToolResult": {
@@ -3914,6 +4053,33 @@
         "has_key"
       ],
       "title": "VaultStatus",
+      "type": "object"
+    },
+    "WorkerSlot": {
+      "additionalProperties": false,
+      "properties": {
+        "worker_id": {
+          "title": "Worker Id",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        }
+      },
+      "required": [
+        "worker_id",
+        "run_id"
+      ],
+      "title": "WorkerSlot",
       "type": "object"
     },
     "WorkflowArchiveInput": {

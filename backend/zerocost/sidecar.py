@@ -17,7 +17,8 @@ from .models import Request, Failure, Success
 from .storage import Store
 from .workspace_tools import inspect_file_size, list_directory, read_file
 from .models import (OrchestrationEnd, OrchestrationPaused, OrchestrationQueued,
-                     OrchestrationRoute, OrchestrationStarted)
+                     OrchestrationRoute, OrchestrationRuntime, OrchestrationStarted,
+                     WorkerSlot)
 from .pricing import CATALOG_VERSION, catalog, estimate_plan
 from .embeddings import OllamaEmbeddings
 from .chunking import build_semantic_chunks
@@ -352,6 +353,11 @@ class ChatService:
                 result = self.store.history(request.params.agent_id)
             elif request.method == 'orchestration.history':
                 result = self.store.orchestration_history()
+                runtime = (self.orchestrator.runtime_snapshot(self.active_workers)
+                           if self.orchestrator else OrchestrationRuntime(
+                               workers=[WorkerSlot(worker_id=worker)
+                                        for worker in self.WORKER_IDS]))
+                result = result.model_copy(update={'runtime': runtime})
             elif request.method == 'orchestration.start':
                 if self.store.queue_depth() >= self.MAX_QUEUED_ORCHESTRATIONS:
                     raise ValueError('Görev kuyruğu kapasitesine ulaştı.')

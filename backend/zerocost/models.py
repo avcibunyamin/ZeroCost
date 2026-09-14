@@ -720,6 +720,7 @@ class OrchestrationRun(Model):
     started_at: str | None
     resumed_at: str | None
     finished_at: str | None
+    status_events: list["OrchestrationStatusEvent"] = Field(default_factory=list)
     tool_action: ToolAction | None
     status: OrchestrationStatus
     error: str
@@ -728,6 +729,34 @@ class OrchestrationRun(Model):
 
 class OrchestrationHistory(Model):
     runs: list[OrchestrationRun]
+    runtime: "OrchestrationRuntime" = Field(default_factory=lambda: OrchestrationRuntime())
+
+
+class OrchestrationStatusEvent(Model):
+    sequence: int
+    from_status: Literal["", "queued", "running", "paused", "waiting_approval",
+                               "completed", "cancelled", "failed", "interrupted"]
+    to_status: OrchestrationStatus
+    reason: str
+    timestamp: str
+
+
+class WorkerSlot(Model):
+    worker_id: str
+    run_id: str | None = None
+
+
+class ConnectionRuntime(Model):
+    connection_id: str
+    holder_run_id: str | None = None
+    holder_worker_id: str = ""
+    waiting_run_ids: list[str] = Field(default_factory=list)
+
+
+class OrchestrationRuntime(Model):
+    worker_limit: int = 2
+    workers: list[WorkerSlot] = Field(default_factory=list)
+    connections: list[ConnectionRuntime] = Field(default_factory=list)
 
 
 class ModelCallAttempt(Model):
