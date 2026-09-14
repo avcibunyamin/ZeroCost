@@ -5,9 +5,21 @@ import pytest
 from pydantic import SecretStr
 from google import genai
 from zerocost.providers.cloud import AnthropicProvider, GeminiProvider
-from zerocost.providers.base import Message, ProviderError
+from zerocost.providers.base import (Message, ProviderError, RetryableProviderError,
+                                     provider_exception)
 
 MESSAGES = [Message(role='system', content='instructions'), Message(role='user', content='hello')]
+
+
+def test_retry_after_is_extracted_without_exposing_provider_response():
+    response = httpx.Response(429, headers={'Retry-After': '12'})
+    error = provider_exception('Sağlayıcı geçici olarak sınırladı.',
+                               httpx.HTTPStatusError('secret upstream body',
+                                                     request=httpx.Request('GET', 'https://example.test'),
+                                                     response=response))
+    assert isinstance(error, RetryableProviderError)
+    assert error.retry_after_seconds == 12
+    assert 'secret upstream body' not in str(error)
 
 
 @pytest.mark.parametrize('complete', [True, False])

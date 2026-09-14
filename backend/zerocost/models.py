@@ -38,8 +38,21 @@ class AgentInput(Model):
 
 class Agent(AgentInput):
     id: str
+    fallback_connection_ids: list[Identifier] = Field(default_factory=list, max_length=3)
     permissions: list[Permission] = Field(default_factory=list)
     skill_ids: list[str] = Field(default_factory=list)
+
+
+class AgentFallbacksInput(Model):
+    agent_id: Identifier
+    connection_ids: list[Identifier] = Field(default_factory=list, max_length=3)
+
+    @field_validator("connection_ids")
+    @classmethod
+    def unique_connections(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("Duplicate fallback connection")
+        return value
 
 
 class SkillPackageInput(Model):
@@ -206,6 +219,11 @@ class AgentPermissionsInput(Model):
 class AgentPermissionsRequest(RequestBase):
     method: Literal["agent.permissions.set"]
     params: AgentPermissionsInput
+
+
+class AgentFallbacksRequest(RequestBase):
+    method: Literal["agent.fallbacks.set"]
+    params: AgentFallbacksInput
 
 
 class WorkspaceTarget(Model):
@@ -687,6 +705,8 @@ class OrchestrationRun(Model):
     error_class: Literal["", "retryable", "permanent", "uncertain_tool"]
     cumulative_model_calls: int
     cumulative_cost_microusd: int
+    fallback_chain: list[list[str]] = Field(default_factory=list)
+    model_call_attempts: list["ModelCallAttempt"] = Field(default_factory=list)
     tool_action: ToolAction | None
     status: OrchestrationStatus
     error: str
@@ -695,6 +715,21 @@ class OrchestrationRun(Model):
 
 class OrchestrationHistory(Model):
     runs: list[OrchestrationRun]
+
+
+class ModelCallAttempt(Model):
+    id: str
+    run_id: str
+    node_name: str
+    connection_id: str
+    attempt: int
+    outcome: Literal["success", "retryable", "permanent", "budget_exceeded", "skipped"]
+    error_message: str
+    input_tokens: int
+    output_tokens: int
+    cost_microusd: int
+    started_at: str
+    duration_ms: int
 
 
 class OrchestrationChunk(Model):
@@ -805,8 +840,22 @@ class OrchestrationRetrying(Model):
     is_final: Literal[False] = False
 
 
+class OrchestrationFallback(Model):
+    protocol_version: Literal[1] = 1
+    type: Literal["orchestration_fallback"] = "orchestration_fallback"
+    run_id: str
+    sequence: int
+    agent_id: str
+    phase: OrchestrationPhase
+    from_connection_id: str
+    to_connection_id: str
+    message: str
+    is_final: Literal[False] = False
+
+
 Request = Annotated[Union[SnapshotRequest, ConnectionRequest, AgentRequest, WorkspaceRequest,
-                         AgentPermissionsRequest, WorkspaceListRequest, WorkspaceReadRequest,
+                         AgentPermissionsRequest, AgentFallbacksRequest,
+                         WorkspaceListRequest, WorkspaceReadRequest,
                          ModelsRequest, ChatStartRequest, CancelRequest, HistoryRequest, VaultRequest,
                          OrchestrationStartRequest, OrchestrationCancelRequest,
                          OrchestrationApprovalRequest, OrchestrationRetryRequest,
@@ -838,5 +887,5 @@ class Contract(Model):
     event: Union[StreamEvent, OrchestrationChunk, OrchestrationMessageEnd,
                  OrchestrationEnd, OrchestrationError, OrchestrationRoute,
                  OrchestrationApprovalRequired, OrchestrationUsage,
-                 OrchestrationToolResult, OrchestrationRetrying,
+                 OrchestrationToolResult, OrchestrationRetrying, OrchestrationFallback,
                  KnowledgeIngestionProgress]

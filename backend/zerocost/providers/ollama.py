@@ -55,6 +55,15 @@ class OllamaProvider(ProviderAdapter):
                     if response.status_code >= 300:
                         error = (RetryableProviderError if response.status_code == 429 or
                                  response.status_code >= 500 else PermanentProviderError)
+                        retry_after = None
+                        if response.status_code == 429:
+                            try:
+                                retry_after = max(0.0, float(response.headers.get('retry-after', '')))
+                            except ValueError:
+                                pass
+                        if error is RetryableProviderError:
+                            raise error(f'Ollama isteği reddetti (HTTP {response.status_code}).',
+                                        retry_after)
                         raise error(f'Ollama isteği reddetti (HTTP {response.status_code}).')
                     # Bound each NDJSON frame, including a server that never emits a newline.
                     buffer = b''

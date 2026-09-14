@@ -1,8 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import {
   Activity,
+  ArrowDown,
   MessageSquare,
   ArrowRight,
+  ArrowUp,
   Bot,
   Check,
   ChevronRight,
@@ -33,6 +35,7 @@ import type {
   WorkspaceInput,
   Permission,
   AgentPermissionsInput,
+  AgentFallbacksInput,
   SkillPackageInput,
   SkillAssignInput,
   WorkflowTemplateInput,
@@ -221,6 +224,22 @@ export default function App() {
       setLoading(false);
     }
   }
+  async function setFallbacks(agentId: string, connectionIds: string[]) {
+    setLoading(true);
+    setError("");
+    try {
+      const params: AgentFallbacksInput = {
+        agent_id: agentId,
+        connection_ids: connectionIds as AgentFallbacksInput["connection_ids"],
+      };
+      setSnapshot(await send({ method: "agent.fallbacks.set", params }));
+      setNotice("Fallback model sırası kaydedildi.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
   async function toggleSkill(agentId: string, skillId: string) {
     setLoading(true);
     setError("");
@@ -312,6 +331,58 @@ export default function App() {
               snapshot.connections.find((c) => c.id === agent.connection_id)
                 ?.model_id
             }
+          </div>
+          <div className="fallback-editor">
+            <strong>Model fallback sırası</strong>
+            {agent.fallback_connection_ids.map((connectionId, fallbackIndex) => {
+              const connection = snapshot.connections.find((item) => item.id === connectionId);
+              return (
+                <div className="fallback-row" key={connectionId}>
+                  <span>{fallbackIndex + 1}. {connection?.name ?? connectionId}</span>
+                  <div>
+                    <button type="button" className="icon-button" disabled={loading || fallbackIndex === 0}
+                      aria-label="Yukarı taşı" onClick={() => {
+                        const next = [...agent.fallback_connection_ids];
+                        [next[fallbackIndex - 1], next[fallbackIndex]] =
+                          [next[fallbackIndex], next[fallbackIndex - 1]];
+                        void setFallbacks(agent.id, next);
+                      }}><ArrowUp size={13} /></button>
+                    <button type="button" className="icon-button"
+                      disabled={loading || fallbackIndex === agent.fallback_connection_ids.length - 1}
+                      aria-label="Aşağı taşı" onClick={() => {
+                        const next = [...agent.fallback_connection_ids];
+                        [next[fallbackIndex], next[fallbackIndex + 1]] =
+                          [next[fallbackIndex + 1], next[fallbackIndex]];
+                        void setFallbacks(agent.id, next);
+                      }}><ArrowDown size={13} /></button>
+                    <button type="button" className="icon-button" disabled={loading}
+                      aria-label="Fallback kaldır" onClick={() => void setFallbacks(
+                        agent.id, agent.fallback_connection_ids.filter((id) => id !== connectionId),
+                      )}><X size={13} /></button>
+                  </div>
+                </div>
+              );
+            })}
+            {agent.fallback_connection_ids.length < 3 && (
+              <select aria-label="Fallback model ekle" value="" disabled={loading}
+                onChange={(event) => {
+                  if (event.target.value) void setFallbacks(
+                    agent.id, [...agent.fallback_connection_ids, event.target.value],
+                  );
+                }}>
+                <option value="">Fallback ekle…</option>
+                {snapshot.connections.filter((connection) =>
+                  ["ollama", "anthropic", "gemini"].includes(connection.provider) &&
+                  connection.id !== agent.connection_id &&
+                  !(agent.fallback_connection_ids as string[]).includes(connection.id),
+                ).map((connection) => (
+                  <option key={connection.id} value={connection.id}>
+                    {connection.name} · {connection.model_id}
+                  </option>
+                ))}
+              </select>
+            )}
+            <small>Aynı sağlayıcıda ucuz → güçlü model sırası kullanabilirsiniz.</small>
           </div>
           <footer>
             {(["workspace.read", "workspace.write", "terminal.execute"] as Permission[]).map(

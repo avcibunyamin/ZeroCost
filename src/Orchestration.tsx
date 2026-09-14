@@ -157,6 +157,9 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       } else if (payload.type === "orchestration_retrying") {
         setStreaming(null);
         setRetryNotice(payload.message);
+      } else if (payload.type === "orchestration_fallback") {
+        setStreaming(null);
+        setRetryNotice(payload.message);
       } else if (payload.type === "orchestration_message_end") {
         setRuns((items) =>
           items.map((run) =>
@@ -322,6 +325,11 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       error_class: "",
       cumulative_model_calls: 0,
       cumulative_cost_microusd: 0,
+      fallback_chain: selected.map((agentId) => {
+        const agent = snapshot?.agents.find((item) => item.id === agentId);
+        return agent ? [agent.connection_id, ...agent.fallback_connection_ids] : [];
+      }),
+      model_call_attempts: [],
       messages: [],
     };
     runId.current = id;
@@ -829,6 +837,27 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
             <strong>{current.tool_action.tool} · {current.tool_action.status}</strong>
             {current.tool_action.result && <pre>{current.tool_action.result}</pre>}
           </div>}
+          {!!current?.model_call_attempts.length && (
+            <div className="approval-card model-call-audit">
+              <strong>Model çağrı günlüğü</strong>
+              {current.model_call_attempts.map((item) => {
+                const connection = snapshot?.connections.find(
+                  (candidate) => candidate.id === item.connection_id,
+                );
+                return (
+                  <div key={item.id}>
+                    <span>{item.node_name} · {connection?.name ?? item.connection_id}</span>
+                    <small>
+                      {item.outcome} · {item.duration_ms} ms · ${
+                        (item.cost_microusd / 1_000_000).toFixed(6)
+                      }
+                    </small>
+                    {item.error_message && <small>{item.error_message}</small>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
       </div>
     </>

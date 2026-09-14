@@ -1,9 +1,11 @@
 """Durable multi-agent graph with routing, budgets, and approval interrupts."""
 from __future__ import annotations
 import asyncio
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
+import time
 from typing import TypedDict
 from pydantic import SecretStr
 from langgraph.graph import END, START, StateGraph
@@ -11,7 +13,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command, interrupt
 from .models import (OrchestrationApprovalRequired, OrchestrationChunk,
                      OrchestrationEnd, OrchestrationError, OrchestrationMessageEnd,
-                     OrchestrationRetrying, OrchestrationToolResult, OrchestrationUsage)
+                     OrchestrationFallback, OrchestrationRetrying,
+                     OrchestrationToolResult, OrchestrationUsage)
 from .providers import get_provider
 from .providers.base import (Message, PermanentProviderError, ProviderError,
                              RetryableProviderError)
@@ -29,6 +32,7 @@ class GraphState(TypedDict):
     rounds: int
     max_output_tokens: int
     max_cost_microusd: int
+    fallback_chain: list[list[str]]
     current_round: int
     current_index: int
     event_sequence: int
@@ -119,7 +123,15 @@ class OrchestrationEngine:
 
     async def _generate(self, run_id: str, state: GraphState, agent_id: str, phase: str,
                         credentials: dict[str, str], prompt: str, node_name: str):
-        agent, connection = self._agent_connection(agent_id)
+        agent, current_primary = self._agent_connection(agent_id)
+        snapshot = self.store.snapshot()
+        connections = {item.id: item for item in snapshot.connections}
+        agent_index = state['agent_ids'].index(agent_id)
+        frozen = state.get('fallback_chain') or []
+        chain_ids = frozen[agent_index] if agent_index < len(frozen) else [current_primary.id]
+        chain = [connections[item] for item in chain_ids if item in connections]
+        if not chain or len(chain) != len(chain_ids):
+            raise PermanentProviderError('Dondurulmuş model zinciri geçersiz.')
         system_content = f'Rol: {agent.role}\n{agent.instructions}'
         skill_block = self._skill_instructions(agent_id)
         if skill_block:
@@ -128,51 +140,130 @@ class OrchestrationEngine:
                     Message(role='user', content=prompt)]
         sequence = max(state['event_sequence'], self.event_sequences.get(run_id, 0))
         provider = None
+        connection = chain[0]
         content = ''
-        for attempt in range(1, 4):
-            provider = self.provider_factory(connection.provider, connection.model_id)
-            content = ''
+        call_index = 0
+        last_retryable = None
+        for connection_index, candidate in enumerate(chain):
+            connection = candidate
+            if connection_index:
+                sequence += 1
+                self.event_sequences[run_id] = sequence
+                self.output(OrchestrationFallback(
+                    run_id=run_id, sequence=sequence, agent_id=agent_id, phase=phase,
+                    from_connection_id=chain[connection_index - 1].id,
+                    to_connection_id=connection.id,
+                    message=f'{chain[connection_index - 1].name} kullanılamadı; '
+                            f'{connection.name} bağlantısına geçiliyor.'))
+            call_index += 1
+            audit_started = datetime.now(timezone.utc).isoformat()
+            estimated_input = sum(len(item.content.encode('utf-8')) for item in messages) + 2048
             try:
-                self.store.increment_model_calls(run_id)
+                estimated_cost = cost_microusd(
+                    connection.provider, connection.model_id,
+                    TokenUsage(estimated_input, state['max_output_tokens']))
             except ValueError as exc:
-                setattr(exc, 'failed_node', node_name)
-                raise
+                self.store.record_model_call(
+                    run_id, node_name, connection.id, call_index, 'skipped', str(exc),
+                    0, 0, 0, audit_started, 0)
+                continue
+            remaining = state['max_cost_microusd'] - self.store.family_usage(run_id)['cost']
+            if estimated_cost > remaining:
+                self.store.record_model_call(
+                    run_id, node_name, connection.id, call_index, 'budget_exceeded',
+                    'Kalan görev bütçesi bu bağlantı için yetersiz.', 0, 0, 0,
+                    audit_started, 0)
+                continue
 
-            async def consume():
-                nonlocal content, sequence
-                key = credentials.get(connection.id)
-                stream = provider.stream_reply(
-                    messages, api_key=SecretStr(key) if key else None,
-                    max_tokens=state['max_output_tokens'])
-                async for token in stream:
-                    if len(content) + len(token) > 128000:
-                        raise PermanentProviderError('Ajan yanıtı uzunluk sınırına ulaştı.')
-                    content += token
-                    sequence += 1
-                    self.event_sequences[run_id] = sequence
-                    self.output(OrchestrationChunk(run_id=run_id, sequence=sequence,
-                                                   agent_id=agent_id, phase=phase, token=token))
-            try:
-                await asyncio.wait_for(consume(), timeout=180)
+            skip_to_fallback = False
+            for attempt in range(1, 4):
+                if attempt > 1:
+                    call_index += 1
+                provider = self.provider_factory(connection.provider, connection.model_id)
+                content = ''
+                started_at = datetime.now(timezone.utc).isoformat()
+                started = time.monotonic()
+                try:
+                    self.store.increment_model_calls(run_id)
+                except ValueError as exc:
+                    self.store.record_model_call(
+                        run_id, node_name, connection.id, call_index, 'budget_exceeded',
+                        str(exc), 0, 0, 0, started_at, 0)
+                    setattr(exc, 'failed_node', node_name)
+                    raise
+
+                async def consume():
+                    nonlocal content, sequence
+                    key = credentials.get(connection.id)
+                    stream = provider.stream_reply(
+                        messages, api_key=SecretStr(key) if key else None,
+                        max_tokens=state['max_output_tokens'])
+                    async for token in stream:
+                        if len(content) + len(token) > 128000:
+                            raise PermanentProviderError('Ajan yanıtı uzunluk sınırına ulaştı.')
+                        content += token
+                        sequence += 1
+                        self.event_sequences[run_id] = sequence
+                        self.output(OrchestrationChunk(
+                            run_id=run_id, sequence=sequence, agent_id=agent_id,
+                            phase=phase, token=token))
+
+                error = None
+                try:
+                    await asyncio.wait_for(consume(), timeout=180)
+                except asyncio.TimeoutError:
+                    error = RetryableProviderError('Model yanıtı zaman aşımına uğradı.')
+                except RetryableProviderError as exc:
+                    error = exc
+                except ProviderError as exc:
+                    usage = getattr(provider, 'usage', TokenUsage())
+                    cost = cost_microusd(connection.provider, connection.model_id, usage)
+                    self.store.record_model_call(
+                        run_id, node_name, connection.id, call_index, 'permanent', str(exc),
+                        usage.input_tokens, usage.output_tokens, cost, started_at,
+                        int((time.monotonic() - started) * 1000))
+                    setattr(exc, 'failed_node', node_name)
+                    raise
+
+                usage = getattr(provider, 'usage', TokenUsage())
+                cost = cost_microusd(connection.provider, connection.model_id, usage)
+                if error is None:
+                    usage_totals = self.store.record_model_call(
+                        run_id, node_name, connection.id, call_index, 'success', '',
+                        usage.input_tokens, usage.output_tokens, cost, started_at,
+                        int((time.monotonic() - started) * 1000))
+                    break
+                self.store.record_model_call(
+                    run_id, node_name, connection.id, call_index, 'retryable', str(error),
+                    usage.input_tokens, usage.output_tokens, cost, started_at,
+                    int((time.monotonic() - started) * 1000))
+                last_retryable = error
+                retry_after = getattr(error, 'retry_after_seconds', None)
+                if retry_after is not None and retry_after > 30:
+                    skip_to_fallback = True
+                    break
+                if attempt >= 3:
+                    break
+                sequence += 1
+                self.event_sequences[run_id] = sequence
+                self.output(OrchestrationRetrying(
+                    run_id=run_id, sequence=sequence, agent_id=agent_id, phase=phase,
+                    attempt=attempt + 1,
+                    message=f'Geçici sağlayıcı hatası; {attempt + 1}. deneme başlatılıyor.'))
+                await asyncio.sleep(retry_after if retry_after is not None
+                                    else 0.25 * (2 ** (attempt - 1)))
+            if error is None:
                 break
-            except asyncio.TimeoutError:
-                error = RetryableProviderError('Model yanıtı zaman aşımına uğradı.')
-            except RetryableProviderError as exc:
-                error = exc
-            except ProviderError as exc:
-                setattr(exc, 'failed_node', node_name)
-                raise
-            if attempt >= 3:
-                setattr(error, 'failed_node', node_name)
-                raise error
-            sequence += 1
-            self.event_sequences[run_id] = sequence
-            self.output(OrchestrationRetrying(
-                run_id=run_id, sequence=sequence, agent_id=agent_id, phase=phase,
-                attempt=attempt + 1,
-                message=f'Geçici sağlayıcı hatası; {attempt + 1}. deneme başlatılıyor.'))
-            await asyncio.sleep(0.25 * (2 ** (attempt - 1)))
-        assert provider is not None
+            if not skip_to_fallback and connection_index == len(chain) - 1:
+                break
+        else:
+            error = last_retryable
+
+        if provider is None or error is not None:
+            failure = last_retryable or PermanentProviderError(
+                'Fallback zincirinde bütçeye ve fiyat kataloğuna uygun model bulunamadı.')
+            setattr(failure, 'failed_node', node_name)
+            raise failure
         sequence += 1
         self.event_sequences[run_id] = sequence
         message_sequence = len(state['transcript']) + 1
@@ -181,7 +272,7 @@ class OrchestrationEngine:
                                             phase=phase, full_content=content))
         usage = getattr(provider, 'usage', TokenUsage())
         cost = cost_microusd(connection.provider, connection.model_id, usage)
-        totals = self.store.record_usage(run_id, usage.input_tokens, usage.output_tokens, cost)
+        totals = usage_totals
         sequence += 1
         self.event_sequences[run_id] = sequence
         self.output(OrchestrationUsage(run_id=run_id, sequence=sequence, **totals))
@@ -433,6 +524,7 @@ class OrchestrationEngine:
                     'objective': params.objective, 'agent_ids': params.agent_ids,
                     'rounds': params.rounds, 'max_output_tokens': params.max_output_tokens,
                     'max_cost_microusd': params.max_cost_microusd,
+                    'fallback_chain': params.fallback_chain,
                     'current_round': 0, 'current_index': 0, 'event_sequence': 0,
                     'transcript': [], 'workspace_id': params.workspace_id,
                     'context_paths': params.context_paths, 'enabled_tools': params.enabled_tools,

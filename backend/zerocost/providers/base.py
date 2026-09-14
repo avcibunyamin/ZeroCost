@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import AsyncIterator
 from pydantic import BaseModel
 from typing import Literal
@@ -17,6 +19,10 @@ class ProviderError(Exception):
 class RetryableProviderError(ProviderError):
     """A transient failure for which repeating an LLM call is safe."""
 
+    def __init__(self, message: str, retry_after_seconds: float | None = None):
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
 
 class PermanentProviderError(ProviderError):
     """A request/configuration failure that must not be retried."""
@@ -33,8 +39,22 @@ def provider_exception(message: str, exc: Exception) -> ProviderError:
     name = type(exc).__name__.casefold()
     transient = transient or any(token in name for token in (
         "timeout", "connection", "network", "serviceunavailable", "ratelimit"))
-    kind = RetryableProviderError if transient else PermanentProviderError
-    return kind(message)
+    if not transient:
+        return PermanentProviderError(message)
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", {}) or {}
+    raw_retry_after = headers.get("retry-after") or headers.get("Retry-After")
+    retry_after = None
+    if raw_retry_after is not None:
+        try:
+            retry_after = max(0.0, float(raw_retry_after))
+        except (TypeError, ValueError):
+            try:
+                retry_after = max(0.0, (parsedate_to_datetime(str(raw_retry_after)) -
+                                  datetime.now(timezone.utc)).total_seconds())
+            except (TypeError, ValueError, OverflowError):
+                pass
+    return RetryableProviderError(message, retry_after)
 
 
 class ProviderAdapter(ABC):

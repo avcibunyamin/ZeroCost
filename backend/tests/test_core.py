@@ -184,7 +184,7 @@ def test_v4_orchestration_migrates_with_budget_defaults(tmp_path):
 
     migrated = Store(path)
     run = migrated.orchestration_history().runs[0]
-    assert migrated.snapshot().database_version == 13
+    assert migrated.snapshot().database_version == 14
     assert run.routing_mode == 'manual' and run.max_model_calls == 5
     assert run.agent_ids == [a.id for a in agents]
     assert migrated.db.execute('PRAGMA foreign_key_check').fetchall() == []
@@ -344,7 +344,7 @@ def test_v8_knowledge_data_migrates_to_versioned_hash_cache(tmp_path):
 
     migrated = Store(path)
     source = migrated.knowledge_source_hash(collection_id, workspace.id, 'legacy.md')
-    assert migrated.snapshot().database_version == 13
+    assert migrated.snapshot().database_version == 14
     assert source == {'content_hash': 'old-hash', 'status': 'ready', 'index_version': 'legacy-v8'}
     assert migrated.search_knowledge_fts(collection_id, 'korunan')[0]['content'] == 'korunan içerik'
     assert migrated.db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
@@ -455,6 +455,24 @@ def configured_store(tmp_path):
     store.create_agent(AgentInput(name='Helper', role='Yardımcı', connection_id=connection.id,
                                   instructions='Kısa yanıt ver.'))
     return store, store.snapshot().agents[0]
+
+
+def test_agent_fallback_order_is_validated_and_persisted(tmp_path):
+    store, agent = configured_store(tmp_path)
+    for name in ('Backup 1', 'Backup 2'):
+        store.create_connection(ConnectionInput(name=name, provider='ollama', model_id=name.lower()))
+    backups = [item.id for item in store.snapshot().connections if item.id != agent.connection_id]
+    result = dispatch(store, request(
+        'agent.fallbacks.set', agent_id=agent.id, connection_ids=list(reversed(backups))))
+    assert result.ok
+    saved = next(item for item in result.result.agents if item.id == agent.id)
+    assert saved.fallback_connection_ids == list(reversed(backups))
+    duplicate = dispatch(store, request(
+        'agent.fallbacks.set', agent_id=agent.id, connection_ids=[backups[0], backups[0]]))
+    primary = dispatch(store, request(
+        'agent.fallbacks.set', agent_id=agent.id, connection_ids=[agent.connection_id]))
+    assert not duplicate.ok and not primary.ok
+    store.close()
 
 
 def test_skill_manifest_versions_assignment_and_contract_validation(tmp_path):
@@ -830,6 +848,122 @@ def test_transient_provider_failure_retries_inside_same_node(tmp_path):
     asyncio.run(scenario())
 
 
+def test_retry_exhaustion_falls_back_and_audits_each_model_call(tmp_path):
+    async def scenario():
+        store = Store(tmp_path / 'fallback.sqlite3')
+        for name, model in (('Primary', 'primary'), ('Backup', 'backup'), ('Peer', 'peer')):
+            store.create_connection(ConnectionInput(name=name, provider='ollama', model_id=model))
+        connections = {item.model_id: item for item in store.snapshot().connections}
+        store.create_agent(AgentInput(name='A', role='review',
+                                     connection_id=connections['primary'].id))
+        store.create_agent(AgentInput(name='B', role='review',
+                                     connection_id=connections['peer'].id))
+        agents = store.snapshot().agents
+        store.set_agent_fallbacks(agents[0].id, [connections['backup'].id])
+        primary_calls = 0
+
+        def factory(_provider, model):
+            nonlocal primary_calls
+            if model == 'primary':
+                primary_calls += 1
+                if primary_calls <= 3:
+                    return FakeProvider(tokens=(), failure=RetryableProviderError('geçici'))
+            return FakeProvider(tokens=('ok',), usage=TokenUsage(2, 1))
+
+        events = []
+        service = ChatService(store, events.append, factory)
+        started = await service.handle(request(
+            'orchestration.start', run_id='fallback-run', objective='İncele',
+            agent_ids=[item.id for item in agents], rounds=1, max_model_calls=10))
+        assert started.ok
+        await service.tasks['fallback-run']
+        run = store.orchestration_history().runs[0]
+        assert run.status == 'completed'
+        assert run.fallback_chain == [
+            [connections['primary'].id, connections['backup'].id], [connections['peer'].id]]
+        assert [item.outcome for item in run.model_call_attempts[:4]] == [
+            'retryable', 'retryable', 'retryable', 'success']
+        assert run.model_call_attempts[3].connection_id == connections['backup'].id
+        assert sum(event.type == 'orchestration_fallback' for event in events) == 1
+        assert run.used_model_calls == 6
+        store.close()
+    asyncio.run(scenario())
+
+
+def test_long_retry_after_moves_to_fallback_without_waiting(tmp_path):
+    async def scenario():
+        store = Store(tmp_path / 'retry-after.sqlite3')
+        for name in ('primary', 'backup', 'peer'):
+            store.create_connection(ConnectionInput(name=name, provider='ollama', model_id=name))
+        connections = {item.model_id: item for item in store.snapshot().connections}
+        store.create_agent(AgentInput(name='A', role='review', connection_id=connections['primary'].id))
+        store.create_agent(AgentInput(name='B', role='review', connection_id=connections['peer'].id))
+        agents = store.snapshot().agents
+        store.set_agent_fallbacks(agents[0].id, [connections['backup'].id])
+        primary_calls = 0
+
+        def factory(_provider, model):
+            nonlocal primary_calls
+            if model == 'primary':
+                primary_calls += 1
+                if primary_calls == 1:
+                    return FakeProvider(tokens=(), failure=RetryableProviderError('limit', 31))
+            return FakeProvider(tokens=('ok',))
+
+        events = []
+        service = ChatService(store, events.append, factory)
+        accepted = await service.handle(request(
+            'orchestration.start', run_id='retry-after', objective='İncele',
+            agent_ids=[item.id for item in agents], rounds=1, max_model_calls=8))
+        assert accepted.ok
+        await service.tasks['retry-after']
+        run = store.orchestration_history().runs[0]
+        assert run.status == 'completed' and run.used_model_calls == 4
+        assert sum(event.type == 'orchestration_retrying' for event in events) == 0
+        assert sum(event.type == 'orchestration_fallback' for event in events) == 1
+        store.close()
+    asyncio.run(scenario())
+
+
+def test_fallback_candidate_is_skipped_when_family_budget_is_insufficient(tmp_path):
+    async def scenario():
+        store = Store(tmp_path / 'fallback-budget.sqlite3')
+        store.create_connection(ConnectionInput(name='Primary', provider='ollama', model_id='primary'))
+        store.create_connection(ConnectionInput(
+            name='Paid backup', provider='gemini', model_id='gemini-2.5-flash'))
+        store.create_connection(ConnectionInput(name='Peer', provider='ollama', model_id='peer'))
+        connections = {item.name: item for item in store.snapshot().connections}
+        store.create_agent(AgentInput(
+            name='A', role='review', connection_id=connections['Primary'].id))
+        store.create_agent(AgentInput(
+            name='B', role='review', connection_id=connections['Peer'].id))
+        agents = store.snapshot().agents
+        store.set_agent_fallbacks(agents[0].id, [connections['Paid backup'].id])
+
+        def factory(_provider, model):
+            if model == 'primary':
+                return FakeProvider(tokens=(), failure=RetryableProviderError('geçici'))
+            return FakeProvider(tokens=('ok',))
+
+        service = ChatService(store, lambda _: None, factory)
+        accepted = await service.handle(request(
+            'orchestration.start', run_id='fallback-budget', objective='İncele',
+            agent_ids=[item.id for item in agents], rounds=1,
+            max_model_calls=8, max_cost_microusd=1),
+            auth={'credentials': {connections['Paid backup'].id: 'synthetic-key'}})
+        assert accepted.ok
+        await service.tasks['fallback-budget']
+        run = store.orchestration_history().runs[0]
+        assert run.status == 'failed' and run.error_class == 'retryable'
+        assert run.used_model_calls == 3
+        assert run.model_call_attempts[-1].outcome == 'budget_exceeded'
+        assert run.model_call_attempts[-1].connection_id == connections['Paid backup'].id
+        store.close()
+        assert all(b'synthetic-key' not in path.read_bytes()
+                   for path in tmp_path.iterdir() if path.is_file())
+    asyncio.run(scenario())
+
+
 def test_failed_node_can_resume_as_new_run_from_persistent_checkpoint(tmp_path):
     async def scenario():
         path = tmp_path / 'durable-retry.sqlite3'
@@ -881,6 +1015,7 @@ def test_permanent_provider_failure_is_not_retried(tmp_path):
     async def scenario():
         store = Store(tmp_path / 'permanent.sqlite3')
         store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+        store.create_connection(ConnectionInput(name='Backup', provider='ollama', model_id='backup'))
         connection = store.snapshot().connections[0]
         for name in ('A', 'B'):
             store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
@@ -889,6 +1024,8 @@ def test_permanent_provider_failure_is_not_retried(tmp_path):
             nonlocal calls
             calls += 1
             return FakeProvider(tokens=(), failure=PermanentProviderError('kalıcı hata'))
+        store.set_agent_fallbacks(store.snapshot().agents[0].id,
+                                  [store.snapshot().connections[1].id])
         service = ChatService(store, lambda _: None, factory)
         started = await service.handle(request(
             'orchestration.start', run_id='permanent', objective='İncele',

@@ -11,7 +11,7 @@ from .models import (Agent, AgentInput, Connection, ConnectionInput, SkillPackag
                      SkillPackageInput, Snapshot, WorkflowSlotInput, WorkflowTemplate,
                      WorkflowTemplateInput, Workspace, WorkspaceInput)
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 
 class Store:
@@ -332,6 +332,37 @@ class Store:
             self.db.execute("PRAGMA legacy_alter_table=OFF")
             self.db.execute("PRAGMA foreign_keys=ON")
 
+        if current < 14:
+            with self.db:
+                agent_columns = {row['name'] for row in self.db.execute(
+                    "PRAGMA table_info(agents)")}
+                if 'fallback_connection_ids' not in agent_columns:
+                    self.db.execute("""ALTER TABLE agents ADD COLUMN
+                        fallback_connection_ids TEXT NOT NULL DEFAULT '[]'""")
+                run_columns = {row['name'] for row in self.db.execute(
+                    "PRAGMA table_info(orchestration_runs)")}
+                if 'fallback_chain' not in run_columns:
+                    self.db.execute("""ALTER TABLE orchestration_runs ADD COLUMN
+                        fallback_chain TEXT NOT NULL DEFAULT '[]'""")
+                self.db.execute("""CREATE TABLE IF NOT EXISTS model_call_attempts (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES orchestration_runs(run_id) ON DELETE CASCADE,
+                    node_name TEXT NOT NULL,
+                    connection_id TEXT NOT NULL REFERENCES connections(id) ON DELETE RESTRICT,
+                    attempt INTEGER NOT NULL CHECK(attempt BETWEEN 1 AND 64),
+                    outcome TEXT NOT NULL CHECK(outcome IN
+                        ('success','retryable','permanent','budget_exceeded','skipped')),
+                    error_message TEXT NOT NULL DEFAULT '',
+                    input_tokens INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    cost_microusd INTEGER NOT NULL DEFAULT 0,
+                    started_at TEXT NOT NULL,
+                    duration_ms INTEGER NOT NULL DEFAULT 0
+                )""")
+                self.db.execute("""CREATE INDEX IF NOT EXISTS model_call_attempts_run
+                    ON model_call_attempts(run_id,node_name,attempt)""")
+                self.db.execute("PRAGMA user_version=14")
+
     def close(self):
         self.db.close()
 
@@ -339,7 +370,8 @@ class Store:
         return Snapshot(
             database_version=self.db.execute("PRAGMA user_version").fetchone()[0],
             connections=[Connection(**dict(row)) for row in self.db.execute("SELECT * FROM connections ORDER BY rowid")],
-            agents=[Agent(**dict(row), permissions=[p[0] for p in self.db.execute(
+            agents=[Agent(**{**dict(row), 'fallback_connection_ids': json.loads(
+                row['fallback_connection_ids'])}, permissions=[p[0] for p in self.db.execute(
                 "SELECT permission FROM agent_permissions WHERE agent_id=? ORDER BY permission", (row["id"],))],
                 skill_ids=self.agent_skill_ids(row["id"]))
                     for row in self.db.execute("SELECT * FROM agents ORDER BY rowid")],
@@ -355,8 +387,27 @@ class Store:
 
     def create_agent(self, value: AgentInput):
         with self.db:
-            self.db.execute("INSERT INTO agents VALUES (?, ?, ?, ?, ?)",
+            self.db.execute("""INSERT INTO agents
+                (id,name,role,connection_id,instructions) VALUES (?, ?, ?, ?, ?)""",
                             (str(uuid4()), value.name, value.role, value.connection_id, value.instructions))
+
+    def set_agent_fallbacks(self, agent_id: str, connection_ids: list[str]):
+        agent = self.db.execute(
+            "SELECT connection_id FROM agents WHERE id=?", (agent_id,)).fetchone()
+        if agent is None:
+            raise ValueError("Ajan bulunamadı.")
+        if agent['connection_id'] in connection_ids:
+            raise ValueError("Birincil bağlantı fallback zincirinde tekrarlanamaz.")
+        found = self.db.execute(
+            f"SELECT id,provider FROM connections WHERE id IN ({','.join('?' for _ in connection_ids)})",
+            connection_ids).fetchall() if connection_ids else []
+        if len(found) != len(connection_ids):
+            raise ValueError("Fallback bağlantılarından biri bulunamadı.")
+        if any(item['provider'] not in ('ollama', 'anthropic', 'gemini') for item in found):
+            raise ValueError("Fallback için sohbet adaptörü hazır bir bağlantı seçin.")
+        with self.db:
+            self.db.execute("UPDATE agents SET fallback_connection_ids=? WHERE id=?",
+                            (json.dumps(connection_ids), agent_id))
 
     def create_workspace(self, value: WorkspaceInput):
         raw = Path(value.path).expanduser()
@@ -667,20 +718,21 @@ class Store:
                             workflow_id: str | None = None,
                             workflow_version: str | None = None,
                             attempt: int = 1, parent_run_id: str | None = None,
-                            resumed_from_node: str = ''):
+                            resumed_from_node: str = '',
+                            fallback_chain: list[list[str]] | None = None):
         with self.db:
             self.db.execute("""INSERT INTO orchestration_runs
                 (run_id,objective,rounds,status,routing_mode,route_reason,max_model_calls,
                  max_output_tokens,workspace_id,context_paths,max_cost_microusd,
                  estimated_max_cost_microusd,price_catalog_version,enabled_tools,
                  knowledge_collection_ids,workflow_id,workflow_version,attempt,parent_run_id,
-                 resumed_from_node)
-                VALUES (?,?,?,'running',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 resumed_from_node,fallback_chain)
+                VALUES (?,?,?,'running',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (run_id, objective, rounds, routing_mode, route_reason, max_model_calls,
                  max_output_tokens, workspace_id, json.dumps(context_paths or []), max_cost_microusd,
                  estimated_max_cost_microusd, price_catalog_version, json.dumps(enabled_tools or []),
                  json.dumps(knowledge_collection_ids or []), workflow_id, workflow_version,
-                 attempt, parent_run_id, resumed_from_node))
+                 attempt, parent_run_id, resumed_from_node, json.dumps(fallback_chain or [])))
             self.db.executemany("INSERT INTO orchestration_participants VALUES (?,?,?)",
                                 [(run_id, agent_id, position) for position, agent_id in enumerate(agent_ids)])
 
@@ -724,6 +776,38 @@ class Store:
             COALESCE(SUM(actual_cost_microusd),0) AS actual_cost_microusd
             FROM orchestration_runs WHERE run_id=? OR parent_run_id=?""", (root, root)).fetchone()
         return dict(row)
+
+    def family_usage(self, run_id: str):
+        spec = self.orchestration_spec(run_id)
+        root = spec['parent_run_id'] or run_id
+        row = self.db.execute("""SELECT COALESCE(SUM(used_model_calls),0) AS calls,
+            COALESCE(SUM(actual_cost_microusd),0) AS cost,
+            COALESCE(SUM(input_tokens),0) AS input_tokens,
+            COALESCE(SUM(output_tokens),0) AS output_tokens FROM orchestration_runs
+            WHERE run_id=? OR parent_run_id=?""", (root, root)).fetchone()
+        return dict(row)
+
+    def record_model_call(self, run_id: str, node_name: str, connection_id: str,
+                          attempt: int, outcome: str, error_message: str,
+                          input_tokens: int, output_tokens: int, cost: int,
+                          started_at: str, duration_ms: int):
+        with self.db:
+            self.db.execute("""INSERT INTO model_call_attempts
+                (id,run_id,node_name,connection_id,attempt,outcome,error_message,
+                 input_tokens,output_tokens,cost_microusd,started_at,duration_ms)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (str(uuid4()), run_id, node_name, connection_id, attempt, outcome,
+                 error_message[:1000], input_tokens, output_tokens, cost,
+                 started_at, max(0, duration_ms)))
+            if input_tokens or output_tokens or cost:
+                self.db.execute("""UPDATE orchestration_runs SET
+                    input_tokens=input_tokens+?, output_tokens=output_tokens+?,
+                    actual_cost_microusd=actual_cost_microusd+? WHERE run_id=?""",
+                    (input_tokens, output_tokens, cost, run_id))
+        family = self.family_usage(run_id)
+        return {'input_tokens': family['input_tokens'],
+                'output_tokens': family['output_tokens'],
+                'actual_cost_microusd': family['cost']}
 
     def set_tool_action(self, run_id: str, proposal: dict, status: str = 'waiting', result: str = ''):
         public = {key: proposal.get(key) for key in (
@@ -778,7 +862,8 @@ class Store:
             context_paths=source['context_paths'], enabled_tools=source['enabled_tools'],
             knowledge_collection_ids=source['knowledge_collection_ids'],
             workflow_id=source['workflow_id'], workflow_version=source['workflow_version'],
-            attempt=attempt, parent_run_id=root, resumed_from_node=source['failed_node'])
+            attempt=attempt, parent_run_id=root, resumed_from_node=source['failed_node'],
+            fallback_chain=source['fallback_chain'])
         return self.orchestration_spec(new_run_id), root
 
     def set_event_sequence(self, run_id: str, sequence: int):
@@ -794,7 +879,8 @@ class Store:
             "SELECT agent_id FROM orchestration_participants WHERE run_id=? ORDER BY position", (run_id,))]
         return {**dict(row), 'agent_ids': agent_ids, 'context_paths': json.loads(row['context_paths']),
                 'enabled_tools': json.loads(row['enabled_tools']),
-                'knowledge_collection_ids': json.loads(row['knowledge_collection_ids'])}
+                'knowledge_collection_ids': json.loads(row['knowledge_collection_ids']),
+                'fallback_chain': json.loads(row['fallback_chain'])}
 
     def waiting_orchestration(self):
         row = self.db.execute("""SELECT run_id FROM orchestration_runs
@@ -802,7 +888,8 @@ class Store:
         return row['run_id'] if row else None
 
     def orchestration_history(self):
-        from .models import OrchestrationHistory, OrchestrationMessage, OrchestrationRun, ToolAction
+        from .models import (ModelCallAttempt, OrchestrationHistory, OrchestrationMessage,
+                             OrchestrationRun, ToolAction)
         runs = []
         rows = self.db.execute("SELECT * FROM orchestration_runs ORDER BY created_at DESC,rowid DESC LIMIT 20")
         for row in rows:
@@ -824,6 +911,9 @@ class Store:
             cumulative = self.db.execute("""SELECT COALESCE(SUM(used_model_calls),0),
                 COALESCE(SUM(actual_cost_microusd),0) FROM orchestration_runs
                 WHERE run_id=? OR parent_run_id=?""", (root, root)).fetchone()
+            attempts = [ModelCallAttempt(**dict(item)) for item in self.db.execute(
+                """SELECT * FROM model_call_attempts WHERE run_id=?
+                ORDER BY started_at,rowid""", (row['run_id'],))]
             runs.append(OrchestrationRun(run_id=row['run_id'], objective=row['objective'], rounds=row['rounds'],
                                          status=row['status'], error=row['error'], agent_ids=agent_ids,
                                          routing_mode=row['routing_mode'], route_reason=row['route_reason'],
@@ -846,5 +936,7 @@ class Store:
                                          failed_node=row['failed_node'], error_class=row['error_class'],
                                          cumulative_model_calls=cumulative[0],
                                          cumulative_cost_microusd=cumulative[1],
+                                         fallback_chain=json.loads(row['fallback_chain']),
+                                         model_call_attempts=attempts,
                                          tool_action=tool_action, messages=messages))
         return OrchestrationHistory(runs=runs)

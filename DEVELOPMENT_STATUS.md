@@ -252,3 +252,17 @@ Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırıl
 - Hedef hash'i eşleşen atomik yazmayı tamamlanmış kabul edip ikinci yazmayı engelleme
 - Süreç yeniden başlatma, aynı düğüm devamı, kalıcı/geçici hata ve araç kurtarma regresyonları
 - 110 Python, 14 JavaScript sözleşme ve 2 etkin Rust testi geçti
+
+## Açık model fallback zinciri
+
+- Ajan başına birincil bağlantının arkasında en fazla üç kullanıcı sıralı fallback
+- SQLite v13 → v14 migration; ajan ayarı, run üzerinde dondurulmuş zincir ve `model_call_attempts`
+- Her bağlantıda üç güvenli retry; geçici hata sonrası sıradaki bağlantıya otomatik geçiş
+- Kalıcı hata için anında durma; bilinmeyen fiyat ve yetersiz aile bütçesinde çağrı öncesi atlama
+- 429 `Retry-After` ≤ 30 saniyede bekleme, daha uzun sürede fallback'e geçme
+- Başarılı/bildirilen başarısız kullanım ile denetim kaydını tek transaction'da maliyetlendirme
+- Rust tarafında bütün dondurulmuş zincir için request-scope Keychain enjeksiyonu
+- Canlı fallback olayı, model çağrı günlüğü ve oklarla sıralanan ajan UI'ı
+- Aynı sağlayıcıda ucuz → güçlü model kullanımına arayüz rehberliği
+- ADR-0004 ile açık seçim, fail-closed bütçe ve credential sınırları
+- 115 Python, 14 JavaScript sözleşme ve 2 etkin Rust testi geçti

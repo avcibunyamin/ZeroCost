@@ -47,6 +47,8 @@ def dispatch(store: Store, raw: str):
             store.create_workspace(request.params)
         elif request.method == "agent.permissions.set":
             store.set_agent_permissions(request.params.agent_id, request.params.permissions)
+        elif request.method == "agent.fallbacks.set":
+            store.set_agent_fallbacks(request.params.agent_id, request.params.connection_ids)
         elif request.method == "workspace.list":
             return Success(request_id=request.request_id, result=list_directory(
                 store, request.params.agent_id, request.params.workspace_id, request.params.path))
@@ -109,20 +111,27 @@ class ChatService:
             checkpoint_thread_id=checkpoint_thread_id,
             continue_checkpoint=continue_checkpoint)
 
-    def validate_orchestration_agents(self, agent_ids, credentials):
+    def validate_orchestration_agents(self, agent_ids, credentials, connection_chains=None):
         snapshot = self.store.snapshot()
         agents = []
-        for agent_id in agent_ids:
+        for index, agent_id in enumerate(agent_ids):
             agent = next((item for item in snapshot.agents if item.id == agent_id), None)
             if agent is None:
                 raise ValueError('Ajan bulunamadı.')
-            connection = next((item for item in snapshot.connections if item.id == agent.connection_id), None)
-            if connection is None:
-                raise ValueError('Ajanın model bağlantısı bulunamadı.')
-            if connection.provider in ('anthropic', 'gemini'):
-                key = credentials.get(connection.id)
-                if not isinstance(key, str) or not key:
-                    raise ValueError(f'{agent.name} için API anahtarı ekleyin.')
+            chain_ids = (connection_chains[index] if connection_chains and
+                         index < len(connection_chains)
+                         else [agent.connection_id, *agent.fallback_connection_ids])
+            for connection_id in chain_ids:
+                connection = next((item for item in snapshot.connections
+                                   if item.id == connection_id), None)
+                if connection is None:
+                    raise ValueError(f'{agent.name} için fallback bağlantısı bulunamadı.')
+                if connection.provider not in ('ollama', 'anthropic', 'gemini'):
+                    raise ValueError(f'{connection.name} için sohbet adaptörü henüz hazır değil.')
+                if connection.provider in ('anthropic', 'gemini'):
+                    key = credentials.get(connection.id)
+                    if not isinstance(key, str) or not key:
+                        raise ValueError(f'{connection.name} için API anahtarı ekleyin.')
             agents.append(agent)
         return snapshot, agents
 
@@ -306,6 +315,8 @@ class ChatService:
                     raise ValueError(
                         f'Tahmini üst maliyet ${estimated_cost / 1_000_000:.4f}; '
                         f'görev bütçesi ${params.max_cost_microusd / 1_000_000:.4f}.')
+                fallback_chain = [[agent.connection_id, *agent.fallback_connection_ids]
+                                  for agent in agents]
                 self.store.start_orchestration(params.run_id, params.objective, params.rounds,
                     params.agent_ids, routing_mode=params.routing_mode, route_reason=reason,
                     max_model_calls=params.max_model_calls, max_output_tokens=params.max_output_tokens,
@@ -315,7 +326,9 @@ class ChatService:
                     workspace_id=params.workspace_id, context_paths=params.context_paths,
                     enabled_tools=params.enabled_tools,
                     knowledge_collection_ids=params.knowledge_collection_ids,
-                    workflow_id=params.workflow_id, workflow_version=params.workflow_version)
+                    workflow_id=params.workflow_id, workflow_version=params.workflow_version,
+                    fallback_chain=fallback_chain)
+                params = SimpleNamespace(**self.store.orchestration_spec(params.run_id))
                 self.output(OrchestrationRoute(run_id=params.run_id, sequence=1,
                     agent_ids=params.agent_ids, reason=reason, planned_model_calls=planned,
                     max_model_calls=params.max_model_calls, max_output_tokens=params.max_output_tokens,
@@ -345,7 +358,7 @@ class ChatService:
                 if not isinstance(credentials, dict):
                     raise ValueError('Kimlik bilgisi zarfı geçersiz.')
                 snapshot, agents = self.validate_orchestration_agents(
-                    spec['agent_ids'], credentials)
+                    spec['agent_ids'], credentials, spec['fallback_chain'])
                 validate_workflow_bindings(
                     self.store, spec['workflow_id'], spec['workflow_version'],
                     spec['agent_ids'], snapshot, require_active=False)
@@ -379,7 +392,8 @@ class ChatService:
                 credentials = auth.get('credentials', {}) if isinstance(auth, dict) else {}
                 if not isinstance(credentials, dict):
                     raise ValueError('Kimlik bilgisi zarfı geçersiz.')
-                snapshot, agents = self.validate_orchestration_agents(source['agent_ids'], credentials)
+                snapshot, agents = self.validate_orchestration_agents(
+                    source['agent_ids'], credentials, source['fallback_chain'])
                 validate_workflow_bindings(
                     self.store, source['workflow_id'], source['workflow_version'],
                     source['agent_ids'], snapshot, require_active=False)

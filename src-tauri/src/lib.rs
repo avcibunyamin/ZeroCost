@@ -42,6 +42,7 @@ fn allowed_event_type(kind: &str) -> bool {
             | "orchestration_usage"
             | "orchestration_tool_result"
             | "orchestration_retrying"
+            | "orchestration_fallback"
             | "knowledge_ingestion_progress"
     )
 }
@@ -267,14 +268,27 @@ fn route_request(client: &Sidecar, mut request: Value) -> Result<Value, String> 
     } else {
         None
     };
-    let agent_connection = |agent_id: &str| -> Result<&str, String> {
-        snapshot["result"]["agents"]
+    let agent_chain = |agent_id: &str| -> Result<Vec<String>, String> {
+        let agent = snapshot["result"]["agents"]
             .as_array()
             .ok_or("Ajanlar alınamadı".to_string())?
             .iter()
             .find(|a| a["id"] == agent_id)
-            .and_then(|a| a["connection_id"].as_str())
-            .ok_or("Ajan bulunamadı".to_string())
+            .ok_or("Ajan bulunamadı".to_string())?;
+        let mut ids = vec![agent["connection_id"]
+            .as_str()
+            .ok_or("Ajan bağlantısı geçersiz".to_string())?
+            .to_owned()];
+        if let Some(fallbacks) = agent["fallback_connection_ids"].as_array() {
+            for id in fallbacks {
+                ids.push(
+                    id.as_str()
+                        .ok_or("Fallback bağlantısı geçersiz".to_string())?
+                        .to_owned(),
+                );
+            }
+        }
+        Ok(ids)
     };
     let connection_ids: Vec<String> = if let Some(ref p) = params {
         vec![p.connection_id.clone()]
@@ -282,7 +296,7 @@ fn route_request(client: &Sidecar, mut request: Value) -> Result<Value, String> 
         let agent_id = request["params"]["agent_id"]
             .as_str()
             .ok_or("Ajan kimliği eksik")?;
-        vec![agent_connection(agent_id)?.to_owned()]
+        vec![agent_chain(agent_id)?[0].clone()]
     } else if matches!(
         method.as_str(),
         "orchestration.approve" | "orchestration.retry"
@@ -293,20 +307,39 @@ fn route_request(client: &Sidecar, mut request: Value) -> Result<Value, String> 
         let run_id = request["params"]["run_id"]
             .as_str()
             .ok_or("Görev kimliği eksik")?;
-        history["result"]["runs"]
+        let run = history["result"]["runs"]
             .as_array()
             .ok_or("Görev geçmişi alınamadı")?
             .iter()
             .find(|run| run["run_id"] == run_id)
-            .and_then(|run| run["agent_ids"].as_array())
-            .ok_or("Görev bulunamadı")?
-            .iter()
-            .map(|id| {
-                id.as_str()
-                    .ok_or("Ajan kimliği geçersiz".to_string())
-                    .map(str::to_owned)
-            })
-            .collect::<Result<Vec<_>, _>>()?
+            .ok_or("Görev bulunamadı")?;
+        let frozen = run["fallback_chain"].as_array();
+        if frozen.is_some_and(|chains| !chains.is_empty()) {
+            frozen
+                .unwrap()
+                .iter()
+                .flat_map(|chain| chain.as_array().into_iter().flatten())
+                .map(|id| {
+                    id.as_str()
+                        .ok_or("Fallback bağlantısı geçersiz".to_string())
+                        .map(str::to_owned)
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            run["agent_ids"]
+                .as_array()
+                .ok_or("Ajan listesi geçersiz")?
+                .iter()
+                .map(|id| {
+                    id.as_str()
+                        .ok_or("Ajan kimliği geçersiz".to_string())
+                        .and_then(&agent_chain)
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
+                .collect()
+        }
     } else {
         request["params"]["agent_ids"]
             .as_array()
@@ -315,11 +348,19 @@ fn route_request(client: &Sidecar, mut request: Value) -> Result<Value, String> 
             .map(|id| {
                 id.as_str()
                     .ok_or("Ajan kimliği geçersiz".to_string())
-                    .and_then(agent_connection)
-                    .map(str::to_owned)
+                    .and_then(&agent_chain)
             })
             .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect()
     };
+    let connection_ids = connection_ids.into_iter().fold(Vec::new(), |mut ids, id| {
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+        ids
+    });
     let resolved = connection_ids
         .iter()
         .map(|id| {
@@ -463,6 +504,7 @@ mod tests {
     #[test]
     fn ingestion_bridge_allows_bounded_long_running_embedding() {
         assert!(allowed_event_type("knowledge_ingestion_progress"));
+        assert!(allowed_event_type("orchestration_fallback"));
         assert!(!allowed_event_type("unknown_progress"));
         assert_eq!(
             response_timeout_seconds(&json!({"method":"knowledge.source.ingest"}), true),

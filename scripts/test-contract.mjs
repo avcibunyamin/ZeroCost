@@ -35,6 +35,7 @@ test("orchestration and workspace responses are closed", () => {
         workflow_id: null, workflow_version: null,
         attempt: 1, parent_run_id: null, resumed_from_node: "", failed_node: "",
         error_class: "", cumulative_model_calls: 3, cumulative_cost_microusd: 0,
+        fallback_chain: [["c1", "c2"], ["c3"]], model_call_attempts: [],
         tool_action: null,
         status: "completed", error: "", messages: [
           { sequence: 1, agent_id: "a", phase: "analysis", content: "view" },
@@ -127,6 +128,10 @@ test("orchestration stream attributes every chunk", () => {
   assert.equal(validateEvent({ protocol_version: 1, type: "orchestration_retrying",
     run_id: "run", sequence: 4, agent_id: "a", phase: "analysis", attempt: 2,
     message: "Geçici hata; yeniden deneniyor.", is_final: false }), true);
+  assert.equal(validateEvent({ protocol_version: 1, type: "orchestration_fallback",
+    run_id: "run", sequence: 5, agent_id: "a", phase: "analysis",
+    from_connection_id: "c1", to_connection_id: "c2",
+    message: "Fallback bağlantısına geçiliyor.", is_final: false }), true);
 });
 
 test("knowledge progress is correlated, bounded and closed", () => {
@@ -167,7 +172,8 @@ test("skill manifests and assignments are typed and closed", () => {
       connections: [{ id: "c", name: "Local", provider: "ollama",
         model_id: "qwen", status: "unconfigured" }],
       agents: [{ id: "a", name: "Reviewer", role: "review", connection_id: "c",
-        instructions: "", permissions: ["workspace.read"], skill_ids: ["s"] }],
+        instructions: "", fallback_connection_ids: [],
+        permissions: ["workspace.read"], skill_ids: ["s"] }],
       skills: [{ id: "s", name: "Code review", version: "1.2.0",
         description: "Review changes", instructions: "Check correctness.",
         required_tools: ["knowledge.search"],

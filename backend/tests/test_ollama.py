@@ -83,5 +83,14 @@ def test_http_status_is_classified_for_retry_safety():
             pass
         else:
             raise AssertionError("404 was not classified as permanent")
+        async def limited(_request):
+            return httpx.Response(429, headers={'Retry-After': '31'})
+        provider = OllamaProvider("model", httpx.MockTransport(limited))
+        try:
+            _ = [chunk async for chunk in provider.stream_reply([Message(role="user", content="hi")])]
+        except RetryableProviderError as error:
+            assert error.retry_after_seconds == 31
+        else:
+            raise AssertionError("429 Retry-After was not preserved")
 
     asyncio.run(scenario())

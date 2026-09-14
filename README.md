@@ -126,6 +126,12 @@ Provider katmanı geçici ve kalıcı hataları ayrı tiplerle sınıflandırır
 
 Mutasyon aracı yürütülmeden hemen önce `executing` durumu, doğrulanmış parametre özeti, kanonik args SHA-256 ve `workspace.write` hedef içerik SHA-256 değeri kalıcı olarak yazılır. Bu sırada süreç kesilirse terminal çağrısı `uncertain` olur ve otomatik tekrarlanmaz; UI tam argv/önizlemeyi göstererek kullanıcıdan yeniden çalıştırmadan devam etme veya görevi durdurma kararı ister. Yazma hedefinin mevcut hash'i beklenen içerik hash'iyle eşleşirse işlem tamamlanmış kabul edilir ve yeniden uygulanmaz; farklı hash güvenli biçimde belirsiz kalır. Tasarım kararı [ADR-0003](docs/adr/0003-durable-node-retry.md) içinde kayıtlıdır.
 
+## Açık model fallback zinciri
+
+Her ajan birincil model bağlantısının arkasına en fazla üç açık fallback bağlantısı ekleyebilir ve listeyi oklarla sıralayabilir. Aynı sağlayıcıdaki ucuz → güçlü model sırası ile farklı sağlayıcı hesapları aynı mekanizmayı kullanır. Görev başlarken bütün ajan zincirleri participant sırasına bağlı JSON snapshot olarak run kaydına dondurulur; ayar sonradan değişse bile onay ve checkpoint retry aynı zinciri kullanır.
+
+Bir bağlantıda üç geçici LLM denemesi tükendiğinde sıradaki aday denenir. 429 `Retry-After` değeri 30 saniye veya daha azsa aynı bağlantı beklenir; daha uzunsa fallback'e geçilir. Kalıcı kimlik doğrulama, model veya protokol hatası zinciri durdurur. Her aday fiyat kataloğu ve kalan aile bütçesiyle çağrıdan önce kontrol edilir; bilinmeyen fiyat ve yetersiz bütçe kapalı davranışla atlanır. `model_call_attempts` tablosu bağlantı, düğüm, sonuç, token, maliyet ve süreyi saklar. Geçişler UI'da canlı görünür, tamamlanan run model çağrı günlüğünü gösterir. Güven ve kapsam kararı [ADR-0004](docs/adr/0004-explicit-model-fallback.md) içinde kayıtlıdır.
+
 ## Pydantic → TypeScript sözleşmesi
 
 Tek kaynak `backend/zerocost/models.py` dosyasıdır.
@@ -139,7 +145,7 @@ npm run schema:check
 
 Çoklu ajan görevleri manuel veya deterministik otomatik routing kullanır. Router kararı ve gerekçesi görev kaydında tutulur. Çağrı bütçesi, görev başlamadan önce gerekli model çağrılarını sınırlar; çıktı bütçesi her sağlayıcı isteğine doğrudan uygulanır. Çalışma alanı dosyaları seçildiyse LangGraph görevi `waiting_approval` checkpoint'inde durur. İçerik ancak kullanıcı somut dosya listesini onayladıktan sonra okunur; ret halinde hiçbir model çağrısı yapılmaz.
 
-Protokol v1 yapılandırma komutlarına ek olarak sohbet, kasa, workspace okuma, `pricing.catalog`, `skill.create/assign/unassign`, `workflow.create/archive`, `knowledge.snapshot`, `knowledge.collection.create` ve `orchestration.start/approve/retry/cancel/history` komutlarını sunar. Her komut `request_id` ve `protocol_version` içerir. Akış parçaları `run_id`, monoton `sequence`, olay türü, ajan/aşama kimliği ve terminal işareti taşır. Yanıtlar ile akış olayları Pydantic'ten üretilen ayrı çalışma zamanı doğrulayıcılarından geçer.
+Protokol v1 yapılandırma komutlarına ek olarak sohbet, kasa, workspace okuma, `agent.fallbacks.set`, `pricing.catalog`, `skill.create/assign/unassign`, `workflow.create/archive`, `knowledge.snapshot`, `knowledge.collection.create` ve `orchestration.start/approve/retry/cancel/history` komutlarını sunar. Her komut `request_id` ve `protocol_version` içerir. Akış parçaları `run_id`, monoton `sequence`, olay türü, ajan/aşama kimliği ve terminal işareti taşır. Yanıtlar ile akış olayları Pydantic'ten üretilen ayrı çalışma zamanı doğrulayıcılarından geçer.
 
 ## Veri ve süreç yaşam döngüsü
 
@@ -175,7 +181,6 @@ macOS uygulaması `src-tauri/target/release/bundle/macos/ZeroCost.app` altında 
 ## Sonraki geliştirme dilimi
 
 1. Workflow tarifleri için çalıştırma geçmişi filtresi, kopyalama ve açık sürüm karşılaştırması.
-2. Sağlayıcı fallback zinciri ve kullanıcı onaylı model değişimi.
-3. Task queue, worker pool ve stream backpressure.
-4. Ayrı bir dilimde görsel graph editörü ve topoloji doğrulaması.
-5. Üçüncü taraf plugin manifesti, imza doğrulaması ve sandbox sınırı.
+2. Task queue, worker pool ve stream backpressure.
+3. Ayrı bir dilimde görsel graph editörü ve topoloji doğrulaması.
+4. Üçüncü taraf plugin manifesti, imza doğrulaması ve sandbox sınırı.
