@@ -42,7 +42,7 @@ export function Chat({
       );
       return (
         connection &&
-        (["anthropic", "gemini"].includes(connection.provider) ||
+        (["anthropic", "gemini", "openai", "lmstudio"].includes(connection.provider) ||
           (connection.provider === "ollama" &&
             installed.has(connection.model_id)))
       );
@@ -187,6 +187,7 @@ export function Chat({
             name: `Ollama · ${model}`.slice(0, 100),
             provider: "ollama",
             model_id: model,
+            base_url: "",
           },
         });
         onSnapshot(current);

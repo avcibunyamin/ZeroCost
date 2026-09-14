@@ -30,7 +30,7 @@ test("orchestration and workspace responses are closed", () => {
         max_model_calls: 5, max_output_tokens: 512, used_model_calls: 3,
         max_cost_microusd: 5000000, estimated_max_cost_microusd: 0,
         actual_cost_microusd: 0, input_tokens: 0, output_tokens: 0,
-        price_catalog_version: "2026-09-09",
+        price_catalog_version: "2026-09-14", pricing_warning: "",
         workspace_id: null, context_paths: [], enabled_tools: [], knowledge_collection_ids: [],
         workflow_id: null, workflow_version: null,
         attempt: 1, parent_run_id: null, resumed_from_node: "", failed_node: "",
@@ -73,11 +73,16 @@ test("pricing catalog response is typed and closed", () => {
     request_id: "prices",
     ok: true,
     result: {
-      version: "2026-09-09",
+      version: "2026-09-14",
       currency: "USD",
-      sources: { gemini: "https://ai.google.dev/gemini-api/docs/pricing" },
-      entries: [{ provider: "gemini", model_pattern: "gemini-2-5-flash",
-        input_per_million_usd: 0.3, output_per_million_usd: 2.5 }],
+      sources: { gemini: "https://ai.google.dev/gemini-api/docs/pricing",
+        openai: "https://developers.openai.com/api/docs/models" },
+      entries: [
+        { provider: "gemini", model_pattern: "gemini-2-5-flash",
+          input_per_million_usd: 0.3, output_per_million_usd: 2.5 },
+        { provider: "openai", model_pattern: "gpt-4o-mini",
+          input_per_million_usd: 0.15, output_per_million_usd: 0.6 },
+      ],
     },
   };
   assert.equal(validate(response), true);
@@ -199,7 +204,7 @@ test("skill manifests and assignments are typed and closed", () => {
     result: {
       ...valid.result,
       connections: [{ id: "c", name: "Local", provider: "ollama",
-        model_id: "qwen", status: "unconfigured" }],
+        model_id: "qwen", base_url: "", status: "unconfigured" }],
       agents: [{ id: "a", name: "Reviewer", role: "review", connection_id: "c",
         instructions: "", fallback_connection_ids: [],
         permissions: ["workspace.read"], skill_ids: ["s"] }],

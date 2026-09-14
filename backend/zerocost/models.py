@@ -1,5 +1,6 @@
 """Single source of truth for the desktop IPC contract."""
 from typing import Annotated, Literal, Union
+from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
@@ -21,6 +22,32 @@ class ConnectionInput(Model):
     name: Name
     provider: Provider
     model_id: Name
+    base_url: Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)] = ""
+
+    @model_validator(mode="after")
+    def safe_provider_endpoint(self):
+        if self.provider == "openai":
+            if self.base_url and self.base_url.rstrip("/") != "https://api.openai.com/v1":
+                raise ValueError("OpenAI endpoint cannot be changed")
+            self.base_url = "https://api.openai.com/v1"
+        elif self.provider == "lmstudio":
+            value = self.base_url or "http://127.0.0.1:1234/v1"
+            parsed = urlsplit(value)
+            if (parsed.scheme != "http" or parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
+                    or parsed.username or parsed.password or parsed.query or parsed.fragment
+                    or parsed.path.rstrip("/") not in {"", "/v1"}):
+                raise ValueError("LM Studio endpoint must be a loopback HTTP /v1 URL")
+            try:
+                if parsed.port is not None and not 1 <= parsed.port <= 65535:
+                    raise ValueError
+            except ValueError:
+                raise ValueError("LM Studio endpoint port is invalid") from None
+            host = f"[{parsed.hostname}]" if parsed.hostname == "::1" else parsed.hostname
+            port = f":{parsed.port}" if parsed.port is not None else ""
+            self.base_url = f"http://{host}{port}/v1"
+        elif self.base_url:
+            raise ValueError("This provider does not accept a custom endpoint")
+        return self
 
 
 class Connection(ConnectionInput):
@@ -292,6 +319,15 @@ class ModelsRequest(RequestBase):
     method: Literal["ollama.models"]
 
 
+class ConnectionModelsInput(Model):
+    connection_id: Identifier
+
+
+class ConnectionModelsRequest(RequestBase):
+    method: Literal["connection.models"]
+    params: ConnectionModelsInput
+
+
 class ChatStartInput(Model):
     run_id: Identifier
     agent_id: Identifier
@@ -527,7 +563,7 @@ class WorkflowArchiveRequest(RequestBase):
 
 
 class PriceEntry(Model):
-    provider: Literal["anthropic", "gemini"]
+    provider: Literal["anthropic", "gemini", "openai"]
     model_pattern: str
     input_per_million_usd: float
     output_per_million_usd: float
@@ -698,6 +734,7 @@ class OrchestrationRun(Model):
     input_tokens: int
     output_tokens: int
     price_catalog_version: str
+    pricing_warning: str = ""
     workspace_id: str | None
     context_paths: list[str]
     enabled_tools: list[MutationToolName]
@@ -829,6 +866,7 @@ class OrchestrationRoute(Model):
     estimated_max_cost_microusd: int
     max_cost_microusd: int
     price_catalog_version: str
+    pricing_warning: str = ""
     is_final: Literal[False] = False
 
 
@@ -926,7 +964,7 @@ class OrchestrationPaused(Model):
 Request = Annotated[Union[SnapshotRequest, ConnectionRequest, AgentRequest, WorkspaceRequest,
                          AgentPermissionsRequest, AgentFallbacksRequest,
                          WorkspaceListRequest, WorkspaceReadRequest,
-                         ModelsRequest, ChatStartRequest, CancelRequest, HistoryRequest, VaultRequest,
+                         ModelsRequest, ConnectionModelsRequest, ChatStartRequest, CancelRequest, HistoryRequest, VaultRequest,
                          OrchestrationStartRequest, OrchestrationCancelRequest,
                          OrchestrationApprovalRequest, OrchestrationRetryRequest,
                          OrchestrationQueueResumeRequest,

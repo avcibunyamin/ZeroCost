@@ -286,7 +286,8 @@ class OrchestrationEngine:
                 error = None
                 async with self.connection_slot(connection.id, run_id):
                     # Waiting for a connection slot consumes neither call nor cost budget.
-                    provider = self.provider_factory(connection.provider, connection.model_id)
+                    provider = self.provider_factory(
+                        connection.provider, connection.model_id, connection.base_url)
                     started_at = datetime.now(timezone.utc).isoformat()
                     started = time.monotonic()
                     try:

@@ -45,6 +45,7 @@ import { Chat } from "./Chat";
 import { VaultControl } from "./VaultControl";
 import { Orchestration } from "./Orchestration";
 import { Knowledge } from "./Knowledge";
+import { ConnectionModelProbe } from "./ConnectionModelProbe";
 
 type Page =
   | "chat"
@@ -90,6 +91,7 @@ export default function App() {
   const [workflowRounds, setWorkflowRounds] = useState(1);
   const [workflowRequiredTools, setWorkflowRequiredTools] = useState<WorkflowTool[]>([]);
   const [workflowMaxCalls, setWorkflowMaxCalls] = useState(3);
+  const [connectionProvider, setConnectionProvider] = useState<ConnectionInput["provider"]>("ollama");
   const workflowMinimumCalls = workflowSlotCount * workflowRounds + 1
     + (workflowRequiredTools.includes("knowledge.search") ? 1 : 0);
   const connected = desktopAvailable && !!snapshot;
@@ -131,6 +133,7 @@ export default function App() {
           name: field("name"),
           provider: field("provider") as ConnectionInput["provider"],
           model_id: field("model_id"),
+          base_url: field("base_url"),
         };
         result = await send({ method: "connection.create", params });
       } else if (modal === "agent") {
@@ -199,6 +202,7 @@ export default function App() {
       setWorkflowRequiredTools([]);
       setWorkflowMaxCalls(3);
     }
+    if (value === "connection") setConnectionProvider("ollama");
     setModal(value);
   };
   async function togglePermission(agentId: string, permission: Permission) {
@@ -302,14 +306,17 @@ export default function App() {
               {providers[connection.provider]} · {connection.model_id}
             </span>
           </div>
-          {["anthropic", "gemini"].includes(connection.provider) ? (
+          {["anthropic", "gemini", "openai"].includes(connection.provider) ? (
             <VaultControl connectionId={connection.id} />
           ) : (
             <span className="badge neutral">
-              {connection.provider === "ollama"
+              {["ollama", "lmstudio"].includes(connection.provider)
                 ? "Yerel bağlantı"
                 : "Adaptör bekleniyor"}
             </span>
+          )}
+          {(["openai", "lmstudio"] as string[]).includes(connection.provider) && (
+            <ConnectionModelProbe connection={connection} />
           )}
         </div>
       ))}
@@ -372,7 +379,7 @@ export default function App() {
                 }}>
                 <option value="">Fallback ekle…</option>
                 {snapshot.connections.filter((connection) =>
-                  ["ollama", "anthropic", "gemini"].includes(connection.provider) &&
+                  ["ollama", "lmstudio", "anthropic", "gemini", "openai"].includes(connection.provider) &&
                   connection.id !== agent.connection_id &&
                   !(agent.fallback_connection_ids as string[]).includes(connection.id),
                 ).map((connection) => (
@@ -877,8 +884,8 @@ export default function App() {
                   <div className="banner">
                     <CircleHelp size={18} />
                     <span>
-                      Claude ve Gemini anahtarlarını bağlantı bazında OS
-                      kasasına kaydedin. Ardından bu bağlantıyla bir ajan
+                      Claude, Gemini ve OpenAI anahtarlarını bağlantı bazında
+                      OS kasasına kaydedin. Ardından bu bağlantıyla bir ajan
                       oluşturup Sohbet ekranından kullanın.
                     </span>
                   </div>
@@ -1048,7 +1055,9 @@ export default function App() {
                 <>
                   <label>
                     Sağlayıcı
-                    <select name="provider">
+                    <select name="provider" value={connectionProvider}
+                      onChange={(event) => setConnectionProvider(
+                        event.target.value as ConnectionInput["provider"])}>
                       {Object.entries(providers).map(([id, name]) => (
                         <option value={id} key={id}>
                           {name}
@@ -1056,6 +1065,15 @@ export default function App() {
                       ))}
                     </select>
                   </label>
+                  {connectionProvider === "lmstudio" && <label>
+                    Yerel endpoint
+                    <input name="base_url" type="url" maxLength={500}
+                      defaultValue="http://127.0.0.1:1234/v1"
+                      placeholder="http://127.0.0.1:1234/v1" />
+                    <small>Yalnız localhost, 127.0.0.1 veya ::1 üzerindeki HTTP /v1 adresleri kabul edilir.</small>
+                  </label>}
+                  {connectionProvider === "openai" && <input type="hidden" name="base_url"
+                    value="https://api.openai.com/v1" />}
                   <label>
                     Model kimliği
                     <input

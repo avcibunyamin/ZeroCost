@@ -3,10 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_CEILING
 
-CATALOG_VERSION = '2026-09-09'
+CATALOG_VERSION = '2026-09-14'
 CATALOG_SOURCES = {
     'anthropic': 'https://platform.claude.com/docs/en/about-claude/pricing',
     'gemini': 'https://ai.google.dev/gemini-api/docs/pricing',
+    'openai': 'https://developers.openai.com/api/docs/models',
 }
 
 
@@ -40,13 +41,21 @@ GEMINI = (
     (('gemini-2-5-pro',), Price(Decimal('1.25'), Decimal('10'))),
 )
 
+OPENAI = (
+    (('gpt-4o-mini',), Price(Decimal('0.15'), Decimal('0.60'))),
+    (('gpt-4o',), Price(Decimal('2.50'), Decimal('10'))),
+    (('o4-mini',), Price(Decimal('1.10'), Decimal('4.40'))),
+    (('o3',), Price(Decimal('2'), Decimal('8'))),
+)
+
 
 def catalog():
     """Return the public catalog through the typed IPC contract."""
     from .models import PriceEntry, PricingCatalog
 
     entries = []
-    for provider, groups in (('anthropic', ANTHROPIC), ('gemini', GEMINI)):
+    for provider, groups in (('anthropic', ANTHROPIC), ('gemini', GEMINI),
+                             ('openai', OPENAI)):
         for patterns, price in groups:
             entries.extend(PriceEntry(
                 provider=provider,
@@ -61,10 +70,13 @@ def catalog():
 def price_for(provider: str, model_id: str, input_tokens: int = 0) -> Price:
     if provider in ('ollama', 'lmstudio'):
         return Price(Decimal(0), Decimal(0))
-    groups = ANTHROPIC if provider == 'anthropic' else GEMINI if provider == 'gemini' else ()
+    groups = (ANTHROPIC if provider == 'anthropic' else GEMINI if provider == 'gemini'
+              else OPENAI if provider == 'openai' else ())
     normalized = model_id.casefold().replace('.', '-').replace('_', '-')
     for prefixes, price in groups:
-        if any(prefix in normalized for prefix in prefixes):
+        if any((normalized == prefix or normalized.startswith(prefix + '-'))
+               if provider == 'openai' else prefix in normalized
+               for prefix in prefixes):
             if provider == 'gemini' and 'gemini-2-5-pro' in normalized and input_tokens > 200_000:
                 return Price(Decimal('2.50'), Decimal('15'))
             return price
@@ -72,11 +84,37 @@ def price_for(provider: str, model_id: str, input_tokens: int = 0) -> Price:
 
 
 def cost_microusd(provider: str, model_id: str, usage: TokenUsage) -> int:
-    price = price_for(provider, model_id, usage.input_tokens)
+    try:
+        price = price_for(provider, model_id, usage.input_tokens)
+    except ValueError:
+        if provider == 'openai':
+            return 0
+        raise
     # USD/MTok numerically equals micro-USD/token.
     value = (Decimal(usage.input_tokens) * price.input_per_million +
              Decimal(usage.output_tokens) * price.output_per_million)
     return int(value.quantize(Decimal('1'), rounding=ROUND_CEILING))
+
+
+def pricing_warning(snapshot, agent_ids: list[str]) -> str:
+    agents = {agent.id: agent for agent in snapshot.agents}
+    connections = {connection.id: connection for connection in snapshot.connections}
+    unknown = []
+    for agent_id in agent_ids:
+        agent = agents[agent_id]
+        for connection_id in [agent.connection_id, *agent.fallback_connection_ids]:
+            connection = connections[connection_id]
+            if connection.provider != 'openai':
+                continue
+            try:
+                price_for('openai', connection.model_id)
+            except ValueError:
+                if connection.model_id not in unknown:
+                    unknown.append(connection.model_id)
+    if not unknown:
+        return ''
+    return ('Fiyat kataloğunda bulunmayan OpenAI modeli: ' + ', '.join(unknown) +
+            '. Tahmin ve gerçek maliyet bu çağrıları içermez; sağlayıcı faturası oluşabilir.')
 
 
 def estimate_plan(snapshot, agent_ids: list[str], rounds: int, objective: str,

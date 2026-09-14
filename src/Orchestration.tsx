@@ -239,6 +239,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
                   route_reason: payload.reason,
                   estimated_max_cost_microusd:
                     payload.estimated_max_cost_microusd,
+                  pricing_warning: payload.pricing_warning,
                 }
               : run,
           ),
@@ -371,6 +372,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       input_tokens: 0,
       output_tokens: 0,
       price_catalog_version: catalog?.version ?? "yükleniyor",
+      pricing_warning: "",
       used_model_calls: 0,
       workspace_id: workspaceId || null,
       context_paths: contextPaths,
@@ -976,6 +978,9 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
                   {` · katalog ${current.price_catalog_version}`}
                 </small>
               )}
+              {current?.pricing_warning && <small className="pricing-warning">
+                {current.pricing_warning}
+              </small>}
             </div>
             {active && <LoaderCircle className="spin" size={19} />}
           </div>

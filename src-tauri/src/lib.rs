@@ -252,6 +252,7 @@ fn route_request(client: &Sidecar, mut request: Value) -> Result<Value, String> 
             | "orchestration.approve"
             | "orchestration.retry"
             | "orchestration.queue.resume"
+            | "connection.models"
     ) {
         return client.exchange(&request);
     }
@@ -296,6 +297,11 @@ fn route_request(client: &Sidecar, mut request: Value) -> Result<Value, String> 
     };
     let connection_ids: Vec<String> = if let Some(ref p) = params {
         vec![p.connection_id.clone()]
+    } else if method == "connection.models" {
+        vec![request["params"]["connection_id"]
+            .as_str()
+            .ok_or("Bağlantı kimliği eksik")?
+            .to_owned()]
     } else if method == "chat.start" {
         let agent_id = request["params"]["agent_id"]
             .as_str()
@@ -377,7 +383,7 @@ fn route_request(client: &Sidecar, mut request: Value) -> Result<Value, String> 
     let uses_vault = resolved.iter().any(|connection| {
         matches!(
             connection["provider"].as_str(),
-            Some("anthropic" | "gemini")
+            Some("anthropic" | "gemini" | "openai")
         )
     });
     if !uses_vault {
@@ -423,7 +429,7 @@ fn route_request(client: &Sidecar, mut request: Value) -> Result<Value, String> 
             "result":{"connection_id":connection_id,"has_key":has_key}}),
         );
     }
-    if method == "chat.start" {
+    if matches!(method.as_str(), "chat.start" | "connection.models") {
         let secret = entry.get_password().map_err(|_| {
             "API anahtarı okunamadı. Model bağlantıları ekranından anahtar ekleyin."
         })?;
@@ -433,7 +439,7 @@ fn route_request(client: &Sidecar, mut request: Value) -> Result<Value, String> 
         for (id, connection) in connection_ids.iter().zip(resolved.iter()) {
             if matches!(
                 connection["provider"].as_str(),
-                Some("anthropic" | "gemini")
+                Some("anthropic" | "gemini" | "openai")
             ) && !credentials.contains_key(id)
             {
                 let value = keyring::Entry::new("dev.zerocost.desktop", id)

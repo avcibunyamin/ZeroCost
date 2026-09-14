@@ -5,8 +5,13 @@ import pytest
 from pydantic import SecretStr
 from google import genai
 from zerocost.providers.cloud import AnthropicProvider, GeminiProvider
-from zerocost.providers.base import (Message, ProviderError, RetryableProviderError,
+from zerocost.providers.openai_compatible import OpenAIProvider
+from zerocost.providers.base import (Message, PermanentProviderError, ProviderError, RetryableProviderError,
                                      provider_exception)
+from zerocost.pricing import TokenUsage
+from zerocost.models import ConnectionInput, OllamaModel, OllamaModels
+from zerocost.sidecar import ChatService
+from zerocost.storage import Store
 
 MESSAGES = [Message(role='system', content='instructions'), Message(role='user', content='hello')]
 
@@ -96,6 +101,135 @@ def test_errors_do_not_reflect_secrets(provider):
         with pytest.raises(ProviderError) as caught:
             _ = [t async for t in provider('test', client_factory=broken).stream_reply(MESSAGES, api_key=SecretStr('never-expose-this'))]
         assert 'never-expose-this' not in str(caught.value)
+    asyncio.run(run())
+
+
+def test_openai_compatible_stream_auth_done_and_usage():
+    def handler(request):
+        assert request.url == httpx.URL('https://api.openai.com/v1/chat/completions')
+        assert request.headers['authorization'] == 'Bearer synthetic-key'
+        body = json.loads(request.content)
+        assert body['messages'] == [message.model_dump() for message in MESSAGES]
+        assert body['stream_options'] == {'include_usage': True}
+        assert body['max_tokens'] == 512
+        assert 'max_completion_tokens' not in body
+        frames = [
+            {'choices': [{'delta': {'content': 'mer'}, 'finish_reason': None}]},
+            {'choices': [{'delta': {'content': 'haba'}, 'finish_reason': 'stop'}]},
+            {'choices': [], 'usage': {'prompt_tokens': 3, 'completion_tokens': 2}},
+        ]
+        text = ''.join(f'data: {json.dumps(frame)}\r\n\r\n' for frame in frames)
+        return httpx.Response(200, headers={'content-type': 'text/event-stream'},
+                              text=text + 'data: [DONE]\r\n\r\n')
+
+    async def run():
+        provider = OpenAIProvider('gpt-4o-mini', transport=httpx.MockTransport(handler))
+        tokens = [token async for token in provider.stream_reply(
+            MESSAGES, api_key=SecretStr('synthetic-key'))]
+        assert tokens == ['mer', 'haba']
+        assert provider.usage == TokenUsage(3, 2)
+    asyncio.run(run())
+
+
+def test_openai_reasoning_model_uses_completion_token_parameter():
+    def handler(request):
+        body = json.loads(request.content)
+        assert body['max_completion_tokens'] == 321
+        assert 'max_tokens' not in body
+        return httpx.Response(200, headers={'content-type': 'text/event-stream'},
+                              text=('data: {"choices":[{"delta":{"content":"ok"},'
+                                    '"finish_reason":"stop"}]}\n\n'
+                                    'data: [DONE]\n\n'))
+
+    async def run():
+        provider = OpenAIProvider('o4-mini', transport=httpx.MockTransport(handler))
+        assert [token async for token in provider.stream_reply(
+            MESSAGES, api_key=SecretStr('synthetic-key'), max_tokens=321)] == ['ok']
+    asyncio.run(run())
+
+
+def test_lmstudio_uses_same_adapter_without_api_key_and_requires_done():
+    def handler(request):
+        assert request.url == httpx.URL('http://127.0.0.1:1234/v1/chat/completions')
+        assert 'authorization' not in request.headers
+        return httpx.Response(200, headers={'content-type': 'text/event-stream'},
+                              text='data: {"choices":[{"delta":{"content":"partial"},"finish_reason":"stop"}]}\n\n')
+
+    async def run():
+        provider = OpenAIProvider('local', profile='lmstudio',
+                                  transport=httpx.MockTransport(handler))
+        with pytest.raises(RetryableProviderError, match=r'\[DONE\]'):
+            _ = [token async for token in provider.stream_reply(MESSAGES)]
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(('status', 'error_type'), [
+    (401, PermanentProviderError), (429, RetryableProviderError),
+    (500, RetryableProviderError),
+])
+def test_openai_http_status_classification(status, error_type):
+    def handler(_request):
+        return httpx.Response(status, headers={'retry-after': '12'})
+
+    async def run():
+        provider = OpenAIProvider('gpt-4o-mini', transport=httpx.MockTransport(handler))
+        with pytest.raises(error_type) as caught:
+            _ = [token async for token in provider.stream_reply(
+                MESSAGES, api_key=SecretStr('synthetic-key'))]
+        if status == 429:
+            assert caught.value.retry_after_seconds == 12
+    asyncio.run(run())
+
+
+def test_openai_compatible_model_discovery_is_bounded_and_typed():
+    def handler(request):
+        assert request.url.path == '/v1/models'
+        return httpx.Response(200, json={'data': [
+            {'id': 'gpt-4o-mini'}, {'id': 'gpt-4o'}, {'id': 'gpt-4o-mini'}]})
+
+    async def run():
+        provider = OpenAIProvider('gpt-4o-mini', transport=httpx.MockTransport(handler))
+        result = await provider.list_models(api_key=SecretStr('synthetic-key'))
+        assert [model.name for model in result.models] == ['gpt-4o', 'gpt-4o-mini']
+        assert all(model.capabilities == ['completion'] for model in result.models)
+    asyncio.run(run())
+
+
+def test_connection_model_discovery_requires_openai_key_but_not_lmstudio(tmp_path):
+    async def run():
+        store = Store(tmp_path / 'discovery.sqlite3')
+        store.create_connection(ConnectionInput(
+            name='OpenAI', provider='openai', model_id='gpt-4o-mini'))
+        store.create_connection(ConnectionInput(
+            name='LM Studio', provider='lmstudio', model_id='local'))
+        connections = {item.provider: item for item in store.snapshot().connections}
+        seen = []
+
+        class DiscoveryProvider:
+            async def list_models(self, *, api_key=None):
+                seen.append(api_key.get_secret_value() if api_key else None)
+                return OllamaModels(models=[OllamaModel(
+                    name='available', size=0, capabilities=['completion'])])
+
+        def factory(provider, model, base_url):
+            seen.append((provider, model, base_url))
+            return DiscoveryProvider()
+
+        service = ChatService(store, lambda _: None, factory)
+        raw = lambda connection_id: json.dumps({
+            'protocol_version': 1, 'request_id': connection_id,
+            'method': 'connection.models', 'params': {'connection_id': connection_id}})
+        denied = await service.handle(raw(connections['openai'].id))
+        assert not denied.ok and 'API anahtarını' in denied.message
+        openai = await service.handle(raw(connections['openai'].id), auth={
+            'connection_id': connections['openai'].id, 'secret': 'synthetic-key'})
+        local = await service.handle(raw(connections['lmstudio'].id))
+        assert openai.ok and local.ok
+        assert ('openai', 'gpt-4o-mini', 'https://api.openai.com/v1') in seen
+        assert ('lmstudio', 'local', 'http://127.0.0.1:1234/v1') in seen
+        assert 'synthetic-key' in seen and None in seen
+        await service.close()
+        store.close()
     asyncio.run(run())
 
 

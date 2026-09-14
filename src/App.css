@@ -1242,6 +1242,7 @@ main {
   border-color: #bdd8c7;
   background: #f0f7f2;
 }
+.pricing-warning { display: block; margin-top: 5px; color: #9a642e; }
 @media (max-width: 900px) {
   .orchestration-layout {
     grid-template-columns: 1fr;
@@ -1594,6 +1595,17 @@ textarea {
   flex-direction: column;
   align-items: flex-end;
   margin-left: auto;
+}
+.connection-probe {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  margin-left: auto;
+}
+.connection-probe small {
+  max-width: 220px;
+  color: #77867a;
+  text-align: right;
 }
 .vault-editor {
   display: flex;

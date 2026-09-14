@@ -19,7 +19,7 @@ from .workspace_tools import inspect_file_size, list_directory, read_file
 from .models import (OrchestrationEnd, OrchestrationPaused, OrchestrationQueued,
                      OrchestrationRoute, OrchestrationRuntime, OrchestrationStarted,
                      WorkerSlot)
-from .pricing import CATALOG_VERSION, catalog, estimate_plan
+from .pricing import CATALOG_VERSION, catalog, estimate_plan, pricing_warning
 from .embeddings import OllamaEmbeddings
 from .chunking import build_semantic_chunks
 from .documents import parse_document
@@ -207,9 +207,9 @@ class ChatService:
                                    if item.id == connection_id), None)
                 if connection is None:
                     raise ValueError(f'{agent.name} için fallback bağlantısı bulunamadı.')
-                if connection.provider not in ('ollama', 'anthropic', 'gemini'):
+                if connection.provider not in ('ollama', 'lmstudio', 'anthropic', 'gemini', 'openai'):
                     raise ValueError(f'{connection.name} için sohbet adaptörü henüz hazır değil.')
-                if connection.provider in ('anthropic', 'gemini'):
+                if connection.provider in ('anthropic', 'gemini', 'openai'):
                     key = credentials.get(connection.id)
                     if not isinstance(key, str) or not key:
                         raise ValueError(f'{connection.name} için API anahtarı ekleyin.')
@@ -349,6 +349,25 @@ class ChatService:
                     raise ValueError('Bilgi araması zaman aşımına uğradı.') from None
             elif request.method == 'ollama.models':
                 result = await asyncio.wait_for(OllamaProvider('').list_models(), timeout=8)
+            elif request.method == 'connection.models':
+                connection = next((item for item in self.store.snapshot().connections
+                                   if item.id == request.params.connection_id), None)
+                if connection is None or connection.provider not in ('openai', 'lmstudio'):
+                    raise ValueError('Model keşfi yalnız OpenAI ve LM Studio bağlantılarında kullanılabilir.')
+                secret = None
+                if connection.provider == 'openai':
+                    if (not auth or auth.get('connection_id') != connection.id or
+                            not isinstance(auth.get('secret'), str) or not auth['secret']):
+                        raise ValueError('Model keşfi için önce API anahtarını kasaya ekleyin.')
+                    secret = SecretStr(auth['secret'])
+                provider = self.provider_factory(
+                    connection.provider, connection.model_id, connection.base_url)
+                try:
+                    result = await asyncio.wait_for(
+                        provider.list_models(api_key=secret), timeout=3)
+                except asyncio.TimeoutError:
+                    raise ValueError(
+                        'Model keşfi 3 saniyede tamamlanamadı; model kimliğini elle kullanabilirsiniz.') from None
             elif request.method == 'chat.history':
                 result = self.store.history(request.params.agent_id)
             elif request.method == 'orchestration.history':
@@ -400,6 +419,7 @@ class ChatService:
                 estimated_cost = estimate_plan(snapshot, params.agent_ids, params.rounds,
                     params.objective, context_bytes, params.max_output_tokens,
                     extra_synthesis=bool(params.knowledge_collection_ids))
+                price_warning = pricing_warning(snapshot, params.agent_ids)
                 if estimated_cost > params.max_cost_microusd:
                     raise ValueError(
                         f'Tahmini üst maliyet ${estimated_cost / 1_000_000:.4f}; '
@@ -412,6 +432,7 @@ class ChatService:
                     max_cost_microusd=params.max_cost_microusd,
                     estimated_max_cost_microusd=estimated_cost,
                     price_catalog_version=CATALOG_VERSION,
+                    pricing_warning=price_warning,
                     workspace_id=params.workspace_id, context_paths=params.context_paths,
                     enabled_tools=params.enabled_tools,
                     knowledge_collection_ids=params.knowledge_collection_ids,
@@ -423,7 +444,8 @@ class ChatService:
                     max_model_calls=params.max_model_calls, max_output_tokens=params.max_output_tokens,
                     estimated_max_cost_microusd=estimated_cost,
                     max_cost_microusd=params.max_cost_microusd,
-                    price_catalog_version=CATALOG_VERSION))
+                    price_catalog_version=CATALOG_VERSION,
+                    pricing_warning=price_warning))
                 self.store.set_event_sequence(params.run_id, 1)
                 await self.queue_orchestration(vars(params), credentials)
                 result = Accepted(run_id=params.run_id)
@@ -534,11 +556,12 @@ class ChatService:
                 skills = validate_skill_requirements(self.store, agent, allow_tools=False)
                 connection = next(c for c in snapshot.connections if c.id == agent.connection_id)
                 api_key = None
-                if connection.provider in ('anthropic', 'gemini'):
+                if connection.provider in ('anthropic', 'gemini', 'openai'):
                     if not auth or auth.get('connection_id') != connection.id or not isinstance(auth.get('secret'), str) or not auth['secret']:
                         raise ValueError('Bu bağlantıya Model bağlantıları ekranından API anahtarı ekleyin.')
                     api_key = SecretStr(auth['secret'])
-                provider = self.provider_factory(connection.provider, connection.model_id)
+                provider = self.provider_factory(
+                    connection.provider, connection.model_id, connection.base_url)
                 # Only complete pairs are sent back to the model, with a bounded context window.
                 history = [t for t in self.store.history(agent.id).turns if t.status == 'completed']
                 selected = []

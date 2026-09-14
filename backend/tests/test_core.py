@@ -51,6 +51,35 @@ def test_multiple_accounts_and_agents_persist(tmp_path):
     reopened.close()
 
 
+def test_openai_and_lmstudio_connection_profiles_normalize_safe_endpoints(store):
+    store.create_connection(ConnectionInput(
+        name='OpenAI', provider='openai', model_id='gpt-4o-mini'))
+    store.create_connection(ConnectionInput(
+        name='LM Studio', provider='lmstudio', model_id='local-model',
+        base_url='http://localhost:1234/v1/'))
+    connections = {connection.provider: connection for connection in store.snapshot().connections}
+    assert connections['openai'].base_url == 'https://api.openai.com/v1'
+    assert connections['lmstudio'].base_url == 'http://localhost:1234/v1'
+
+
+@pytest.mark.parametrize('endpoint', [
+    'https://localhost:1234/v1',
+    'http://192.168.1.5:1234/v1',
+    'http://127.0.0.1:1234/v1?token=secret',
+    'http://user:pass@localhost:1234/v1',
+    'http://localhost:1234/admin',
+])
+def test_lmstudio_rejects_non_loopback_or_ambiguous_endpoints(endpoint):
+    with pytest.raises(ValueError, match='loopback'):
+        ConnectionInput(name='Unsafe', provider='lmstudio', model_id='local', base_url=endpoint)
+
+
+def test_openai_rejects_custom_endpoint():
+    with pytest.raises(ValueError, match='endpoint'):
+        ConnectionInput(name='Unsafe', provider='openai', model_id='gpt-4o',
+                        base_url='https://example.test/v1')
+
+
 def test_foreign_key_and_unique_constraints(store):
     with pytest.raises(sqlite3.IntegrityError):
         store.create_agent(AgentInput(name='orphan', role='review', connection_id='missing'))
@@ -79,7 +108,7 @@ def test_invalid_requests_are_rejected_without_mutation(store, raw):
 def test_pricing_catalog_is_available_over_ipc(store):
     response = dispatch(store, request('pricing.catalog'))
     assert response.ok
-    assert response.result.version == '2026-09-09'
+    assert response.result.version == '2026-09-14'
     assert response.result.currency == 'USD'
     assert any(entry.model_pattern == 'gemini-2-5-flash'
                for entry in response.result.entries)
@@ -185,7 +214,7 @@ def test_v4_orchestration_migrates_with_budget_defaults(tmp_path):
 
     migrated = Store(path)
     run = migrated.orchestration_history().runs[0]
-    assert migrated.snapshot().database_version == 16
+    assert migrated.snapshot().database_version == 17
     assert run.routing_mode == 'manual' and run.max_model_calls == 5
     assert run.agent_ids == [a.id for a in agents]
     assert migrated.db.execute('PRAGMA foreign_key_check').fetchall() == []
@@ -345,7 +374,7 @@ def test_v8_knowledge_data_migrates_to_versioned_hash_cache(tmp_path):
 
     migrated = Store(path)
     source = migrated.knowledge_source_hash(collection_id, workspace.id, 'legacy.md')
-    assert migrated.snapshot().database_version == 16
+    assert migrated.snapshot().database_version == 17
     assert source == {'content_hash': 'old-hash', 'status': 'ready', 'index_version': 'legacy-v8'}
     assert migrated.search_knowledge_fts(collection_id, 'korunan')[0]['content'] == 'korunan içerik'
     assert migrated.db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
@@ -864,7 +893,7 @@ def test_retry_exhaustion_falls_back_and_audits_each_model_call(tmp_path):
         store.set_agent_fallbacks(agents[0].id, [connections['backup'].id])
         primary_calls = 0
 
-        def factory(_provider, model):
+        def factory(_provider, model, _base_url):
             nonlocal primary_calls
             if model == 'primary':
                 primary_calls += 1
@@ -904,7 +933,7 @@ def test_long_retry_after_moves_to_fallback_without_waiting(tmp_path):
         store.set_agent_fallbacks(agents[0].id, [connections['backup'].id])
         primary_calls = 0
 
-        def factory(_provider, model):
+        def factory(_provider, model, _base_url):
             nonlocal primary_calls
             if model == 'primary':
                 primary_calls += 1
@@ -942,7 +971,7 @@ def test_fallback_candidate_is_skipped_when_family_budget_is_insufficient(tmp_pa
         agents = store.snapshot().agents
         store.set_agent_fallbacks(agents[0].id, [connections['Paid backup'].id])
 
-        def factory(_provider, model):
+        def factory(_provider, model, _base_url):
             if model == 'primary':
                 return FakeProvider(tokens=(), failure=RetryableProviderError('geçici'))
             return FakeProvider(tokens=('ok',))
@@ -1360,6 +1389,37 @@ def test_fiat_budget_rejects_cloud_plan_before_network(tmp_path):
             auth={'credentials': {connection.id: 'synthetic'}})
         assert not response.ok and 'maliyet' in response.message
         assert provider.messages == [] and store.orchestration_history().runs == []
+        store.close()
+    asyncio.run(scenario())
+
+
+def test_unknown_openai_price_warns_without_blocking_orchestration(tmp_path):
+    async def scenario():
+        store = Store(tmp_path / 'unknown-openai-price.sqlite3')
+        store.create_connection(ConnectionInput(
+            name='OpenAI', provider='openai', model_id='future-openai-model'))
+        connection = store.snapshot().connections[0]
+        for name in ('Cloud A', 'Cloud B'):
+            store.create_agent(AgentInput(
+                name=name, role='review', connection_id=connection.id))
+        events = []
+        service = ChatService(store, events.append,
+                              lambda *_: FakeProvider(tokens=('ok',)))
+        response = await service.handle(request(
+            'orchestration.start', run_id='unknown-openai', objective='Çalıştır',
+            agent_ids=[agent.id for agent in store.snapshot().agents], rounds=1,
+            max_model_calls=3, max_output_tokens=128, max_cost_microusd=0),
+            auth={'credentials': {connection.id: 'synthetic'}})
+        assert response.ok
+        await service.tasks['unknown-openai']
+        run = store.orchestration_history().runs[0]
+        assert run.status == 'completed'
+        assert run.estimated_max_cost_microusd == 0
+        assert run.actual_cost_microusd == 0
+        assert 'future-openai-model' in run.pricing_warning
+        route = next(event for event in events if event.type == 'orchestration_route')
+        assert route.pricing_warning == run.pricing_warning
+        await service.close()
         store.close()
     asyncio.run(scenario())
 

@@ -461,6 +461,12 @@
           "title": "Model Id",
           "type": "string"
         },
+        "base_url": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Base Url",
+          "type": "string"
+        },
         "id": {
           "title": "Id",
           "type": "string"
@@ -476,6 +482,7 @@
         "name",
         "provider",
         "model_id",
+        "base_url",
         "id",
         "status"
       ],
@@ -507,14 +514,69 @@
           "minLength": 1,
           "title": "Model Id",
           "type": "string"
+        },
+        "base_url": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Base Url",
+          "type": "string"
         }
       },
       "required": [
         "name",
         "provider",
-        "model_id"
+        "model_id",
+        "base_url"
       ],
       "title": "ConnectionInput",
+      "type": "object"
+    },
+    "ConnectionModelsInput": {
+      "additionalProperties": false,
+      "properties": {
+        "connection_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Connection Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "connection_id"
+      ],
+      "title": "ConnectionModelsInput",
+      "type": "object"
+    },
+    "ConnectionModelsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "method": {
+          "const": "connection.models",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/ConnectionModelsInput"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "request_id",
+        "method",
+        "params"
+      ],
+      "title": "ConnectionModelsRequest",
       "type": "object"
     },
     "ConnectionRequest": {
@@ -2321,6 +2383,11 @@
           "title": "Price Catalog Version",
           "type": "string"
         },
+        "pricing_warning": {
+          "default": "",
+          "title": "Pricing Warning",
+          "type": "string"
+        },
         "is_final": {
           "const": false,
           "default": false,
@@ -2341,6 +2408,7 @@
         "estimated_max_cost_microusd",
         "max_cost_microusd",
         "price_catalog_version",
+        "pricing_warning",
         "is_final"
       ],
       "title": "OrchestrationRoute",
@@ -2414,6 +2482,11 @@
         },
         "price_catalog_version": {
           "title": "Price Catalog Version",
+          "type": "string"
+        },
+        "pricing_warning": {
+          "default": "",
+          "title": "Pricing Warning",
           "type": "string"
         },
         "workspace_id": {
@@ -2647,6 +2720,7 @@
         "input_tokens",
         "output_tokens",
         "price_catalog_version",
+        "pricing_warning",
         "workspace_id",
         "context_paths",
         "enabled_tools",
@@ -3124,7 +3198,8 @@
         "provider": {
           "enum": [
             "anthropic",
-            "gemini"
+            "gemini",
+            "openai"
           ],
           "title": "Provider",
           "type": "string"
@@ -4667,6 +4742,7 @@
           "chat.history": "#/$defs/HistoryRequest",
           "chat.start": "#/$defs/ChatStartRequest",
           "connection.create": "#/$defs/ConnectionRequest",
+          "connection.models": "#/$defs/ConnectionModelsRequest",
           "knowledge.collection.create": "#/$defs/KnowledgeCollectionCreateRequest",
           "knowledge.search": "#/$defs/KnowledgeSearchRequest",
           "knowledge.snapshot": "#/$defs/KnowledgeSnapshotRequest",
@@ -4719,6 +4795,9 @@
         },
         {
           "$ref": "#/$defs/ModelsRequest"
+        },
+        {
+          "$ref": "#/$defs/ConnectionModelsRequest"
         },
         {
           "$ref": "#/$defs/ChatStartRequest"

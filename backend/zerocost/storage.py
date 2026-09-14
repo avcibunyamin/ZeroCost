@@ -11,7 +11,7 @@ from .models import (Agent, AgentInput, Connection, ConnectionInput, SkillPackag
                      SkillPackageInput, Snapshot, WorkflowSlotInput, WorkflowTemplate,
                      WorkflowTemplateInput, Workspace, WorkspaceInput)
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 
 class Store:
@@ -455,6 +455,20 @@ class Store:
                     )""")
                 self.db.execute("PRAGMA user_version=16")
 
+        if current < 17:
+            with self.db:
+                connection_columns = {row['name'] for row in self.db.execute(
+                    "PRAGMA table_info(connections)")}
+                if 'base_url' not in connection_columns:
+                    self.db.execute("""ALTER TABLE connections
+                        ADD COLUMN base_url TEXT NOT NULL DEFAULT ''""")
+                run_columns = {row['name'] for row in self.db.execute(
+                    "PRAGMA table_info(orchestration_runs)")}
+                if 'pricing_warning' not in run_columns:
+                    self.db.execute("""ALTER TABLE orchestration_runs
+                        ADD COLUMN pricing_warning TEXT NOT NULL DEFAULT ''""")
+                self.db.execute("PRAGMA user_version=17")
+
     def close(self):
         self.db.close()
 
@@ -474,8 +488,9 @@ class Store:
 
     def create_connection(self, value: ConnectionInput):
         with self.db:
-            self.db.execute("INSERT INTO connections VALUES (?, ?, ?, ?)",
-                            (str(uuid4()), value.name, value.provider, value.model_id))
+            self.db.execute("""INSERT INTO connections
+                (id,name,provider,model_id,base_url) VALUES (?, ?, ?, ?, ?)""",
+                (str(uuid4()), value.name, value.provider, value.model_id, value.base_url))
 
     def create_agent(self, value: AgentInput):
         with self.db:
@@ -495,7 +510,8 @@ class Store:
             connection_ids).fetchall() if connection_ids else []
         if len(found) != len(connection_ids):
             raise ValueError("Fallback bağlantılarından biri bulunamadı.")
-        if any(item['provider'] not in ('ollama', 'anthropic', 'gemini') for item in found):
+        if any(item['provider'] not in ('ollama', 'lmstudio', 'anthropic', 'gemini', 'openai')
+               for item in found):
             raise ValueError("Fallback için sohbet adaptörü hazır bir bağlantı seçin.")
         with self.db:
             self.db.execute("UPDATE agents SET fallback_connection_ids=? WHERE id=?",
@@ -811,6 +827,7 @@ class Store:
                             max_cost_microusd: int = 5_000_000,
                             estimated_max_cost_microusd: int = 0,
                             price_catalog_version: str = '2026-09-09', workspace_id: str | None = None,
+                            pricing_warning: str = '',
                             context_paths: list[str] | None = None,
                             enabled_tools: list[str] | None = None,
                             knowledge_collection_ids: list[str] | None = None,
@@ -825,13 +842,14 @@ class Store:
             self.db.execute("""INSERT INTO orchestration_runs
                 (run_id,objective,rounds,status,routing_mode,route_reason,max_model_calls,
                  max_output_tokens,workspace_id,context_paths,max_cost_microusd,
-                 estimated_max_cost_microusd,price_catalog_version,enabled_tools,
+                 estimated_max_cost_microusd,price_catalog_version,pricing_warning,enabled_tools,
                  knowledge_collection_ids,workflow_id,workflow_version,attempt,parent_run_id,
                  resumed_from_node,fallback_chain,queue_sequence,queued_at)
-                VALUES (?,?,?,'queued',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
+                VALUES (?,?,?,'queued',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
                 (run_id, objective, rounds, routing_mode, route_reason, max_model_calls,
                  max_output_tokens, workspace_id, json.dumps(context_paths or []), max_cost_microusd,
-                 estimated_max_cost_microusd, price_catalog_version, json.dumps(enabled_tools or []),
+                 estimated_max_cost_microusd, price_catalog_version, pricing_warning,
+                 json.dumps(enabled_tools or []),
                  json.dumps(knowledge_collection_ids or []), workflow_id, workflow_version,
                  attempt, parent_run_id, resumed_from_node, json.dumps(fallback_chain or []),
                  queue_sequence))
@@ -1054,6 +1072,7 @@ class Store:
             max_cost_microusd=source['max_cost_microusd'],
             estimated_max_cost_microusd=source['estimated_max_cost_microusd'],
             price_catalog_version=source['price_catalog_version'], workspace_id=source['workspace_id'],
+            pricing_warning=source['pricing_warning'],
             context_paths=source['context_paths'], enabled_tools=source['enabled_tools'],
             knowledge_collection_ids=source['knowledge_collection_ids'],
             workflow_id=source['workflow_id'], workflow_version=source['workflow_version'],
@@ -1127,6 +1146,7 @@ class Store:
                                          actual_cost_microusd=row['actual_cost_microusd'],
                                          input_tokens=row['input_tokens'], output_tokens=row['output_tokens'],
                                          price_catalog_version=row['price_catalog_version'],
+                                         pricing_warning=row['pricing_warning'],
                                          workspace_id=row['workspace_id'],
                                          context_paths=json.loads(row['context_paths']),
                                          enabled_tools=json.loads(row['enabled_tools']),
