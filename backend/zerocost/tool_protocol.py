@@ -10,6 +10,27 @@ PROVIDER_TOOL_NAMES = {
     'knowledge.search': 'knowledge_search',
 }
 INTERNAL_TOOL_NAMES = {external: internal for internal, external in PROVIDER_TOOL_NAMES.items()}
+MAX_MODEL_TOOL_RESULT_CHARS = 24_000
+MAX_MODEL_TOOL_RESULT_LINES = 200
+
+
+def provider_tool_name(name: str) -> str:
+    return PROVIDER_TOOL_NAMES.get(name, name)
+
+
+def tool_result_for_model(tool_name: str, result: str, arguments: dict) -> str:
+    """Keep the durable full result while bounding the copy sent to a model."""
+    if tool_name == 'workspace.write':
+        content = arguments.get('content', '')
+        path = arguments.get('path', '')
+        return f'File written: {path} ({len(str(content).encode("utf-8"))} bytes).'
+    lines = result.splitlines()
+    truncated = len(lines) > MAX_MODEL_TOOL_RESULT_LINES or len(result) > MAX_MODEL_TOOL_RESULT_CHARS
+    if truncated:
+        tail = '\n'.join(lines[-MAX_MODEL_TOOL_RESULT_LINES:])
+        tail = tail[-MAX_MODEL_TOOL_RESULT_CHARS:]
+        return '[output truncated, showing last 200 lines]\n' + tail
+    return result
 
 
 def tool_declarations(enabled_tools: list[str], collection_ids: list[str]):

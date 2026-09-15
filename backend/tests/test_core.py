@@ -754,7 +754,7 @@ def test_workflow_approval_revalidates_slot_skills(tmp_path):
         service = ChatService(store, lambda _: None, lambda *_: provider)
         started = await service.handle(request(
             'orchestration.start', run_id='workflow-approval', objective='Inspect',
-            agent_ids=[agent.id for agent in agents], rounds=1, max_model_calls=3,
+                agent_ids=[agent.id for agent in agents], rounds=1, max_model_calls=4,
             workspace_id=workspace.id, context_paths=['brief.md'],
             workflow_id=workflow_id, workflow_version='1.0.0'))
         assert started.ok
@@ -1355,7 +1355,7 @@ def test_uncertain_terminal_continues_checkpoint_without_reexecution(tmp_path, m
                               lambda *_: FakeProvider(tokens=(next(replies),)))
         started = await service.handle(request(
             'orchestration.start', run_id='uncertain-run', objective='Test',
-            agent_ids=[agent.id for agent in agents], rounds=1, max_model_calls=3,
+            agent_ids=[agent.id for agent in agents], rounds=1, max_model_calls=4,
             workspace_id=workspace.id, enabled_tools=['terminal.execute']))
         assert started.ok
         await service.tasks['uncertain-run']
@@ -1516,7 +1516,7 @@ def test_model_write_proposal_waits_for_diff_approval_then_writes(tmp_path):
         service = ChatService(store, events.append, factory)
         started = await service.handle(request('orchestration.start', run_id='write-tool',
             objective='Dosyayı güncelle', agent_ids=[a.id for a in agents], rounds=1,
-            max_model_calls=3, workspace_id=workspace.id,
+            max_model_calls=4, workspace_id=workspace.id,
             enabled_tools=['workspace.write']))
         assert started.ok
         await service.tasks['write-tool']
@@ -1537,6 +1537,8 @@ def test_model_write_proposal_waits_for_diff_approval_then_writes(tmp_path):
         assert target.read_text() == 'yeni\n'
         complete = store.orchestration_history().runs[0]
         assert complete.status == 'completed' and complete.tool_action.status == 'completed'
+        assert len(complete.messages) == 4
+        assert complete.messages[-1].content == 'görüş'
         assert any(event.type == 'orchestration_tool_result' for event in events)
         assert events[-1].sequence > approval_sequence
         store.close()
@@ -1561,20 +1563,27 @@ def test_native_tool_call_uses_internal_identity_and_waits_for_approval(tmp_path
         calls = 0
 
         class NativeProvider(FakeProvider):
-            async def stream_reply(self, messages, *, api_key=None, max_tokens=512, tools=None):
+            async def stream_reply(self, messages, *, api_key=None, max_tokens=512, tools=None,
+                                   tool_exchange=None, disable_tools=False):
                 nonlocal calls
                 calls += 1
                 if calls < 3:
                     yield TextChunk('görüş')
-                else:
+                elif calls == 3:
                     assert [item['name'] for item in tools] == ['workspace_write']
                     yield ToolCallChunk(0, 'provider-call-99', 'workspace_write',
                         '{"path":"result.md","content":"new\\n"}', True)
+                else:
+                    assert disable_tools is True
+                    assert tool_exchange.provider_call_id == 'provider-call-99'
+                    assert tool_exchange.tool_name == 'workspace.write'
+                    assert tool_exchange.result == 'File written: result.md (4 bytes).'
+                    yield TextChunk('Dosya başarıyla güncellendi.')
 
         service = ChatService(store, lambda _: None, lambda *_: NativeProvider())
         response = await service.handle(request(
             'orchestration.start', run_id='native-write', objective='Dosyayı güncelle',
-            agent_ids=[agent.id for agent in agents], rounds=1, max_model_calls=3,
+            agent_ids=[agent.id for agent in agents], rounds=1, max_model_calls=4,
             workspace_id=workspace.id, enabled_tools=['workspace.write']))
         assert response.ok
         await service.tasks['native-write']
@@ -1589,8 +1598,82 @@ def test_native_tool_call_uses_internal_identity_and_waits_for_approval(tmp_path
         assert call.arguments == {'path': 'result.md', 'content': 'new\n'}
         assert len(call.args_hash) == len(call.content_hash) == 64
         assert (root / 'result.md').read_text() == 'old\n'
+        approved = await service.handle(request(
+            'orchestration.approve', run_id='native-write', decision='approve'))
+        assert approved.ok
+        await service.tasks['native-write']
+        completed = store.orchestration_history().runs[0]
+        assert completed.status == 'completed'
+        assert completed.messages[-1].content == 'Dosya başarıyla güncellendi.'
+        assert (root / 'result.md').read_text() == 'new\n'
         await service.close()
         store.close()
+    asyncio.run(scenario())
+
+
+def test_final_model_retry_resumes_after_completed_tool_without_reexecution(tmp_path, monkeypatch):
+    import zerocost.orchestration as orchestration_module
+    original_apply_write = orchestration_module.apply_write
+    executions = 0
+    def counted_write(store, proposal):
+        nonlocal executions
+        executions += 1
+        return original_apply_write(store, proposal)
+    monkeypatch.setattr(orchestration_module, 'apply_write', counted_write)
+
+    async def scenario():
+        root = tmp_path / 'project'
+        root.mkdir()
+        target = root / 'result.md'
+        target.write_text('old\n', encoding='utf-8')
+        path = tmp_path / 'final-retry.sqlite3'
+        store = Store(path)
+        store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+        connection = store.snapshot().connections[0]
+        for name in ('Writer', 'Reviewer'):
+            store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+        agents = store.snapshot().agents
+        store.set_agent_permissions(agents[0].id, ['workspace.write'])
+        store.create_workspace(WorkspaceInput(name='Project', path=str(root)))
+        workspace = store.snapshot().workspaces[0]
+        calls = 0
+        def factory(*_):
+            nonlocal calls
+            calls += 1
+            if calls < 3:
+                return FakeProvider(tokens=('view',))
+            if calls == 3:
+                return FakeProvider(tokens=('```zerocost-tool\n'
+                    '{"tool":"workspace.write","path":"result.md","content":"new\\n"}\n```',))
+            return FakeProvider(tokens=(), failure=RetryableProviderError('temporary final failure'))
+        service = ChatService(store, lambda _: None, factory)
+        assert (await service.handle(request(
+            'orchestration.start', run_id='tool-root', objective='write',
+            agent_ids=[agent.id for agent in agents], rounds=1, max_model_calls=10,
+            workspace_id=workspace.id, enabled_tools=['workspace.write']))).ok
+        await service.tasks['tool-root']
+        assert (await service.handle(request(
+            'orchestration.approve', run_id='tool-root', decision='approve'))).ok
+        await service.tasks['tool-root']
+        failed = store.orchestration_history().runs[0]
+        assert failed.status == 'failed' and failed.failed_node == 'finalize_tool'
+        assert failed.tool_action.status == 'completed' and executions == 1
+        assert target.read_text() == 'new\n'
+        await service.close()
+        store.close()
+
+        reopened = Store(path)
+        restarted = ChatService(reopened, lambda _: None,
+                                lambda *_: FakeProvider(tokens=('final answer',)))
+        assert (await restarted.handle(request(
+            'orchestration.retry', run_id='tool-root', new_run_id='tool-retry'))).ok
+        await restarted.tasks['tool-retry']
+        retry = next(run for run in reopened.orchestration_history().runs
+                     if run.run_id == 'tool-retry')
+        assert retry.status == 'completed' and retry.messages[-1].content == 'final answer'
+        assert executions == 1 and target.read_text() == 'new\n'
+        await restarted.close()
+        reopened.close()
     asyncio.run(scenario())
 
 

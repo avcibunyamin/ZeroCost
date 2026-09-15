@@ -2,7 +2,8 @@ import json
 from typing import AsyncIterator
 import httpx
 from .base import (Message, PermanentProviderError, ProviderAdapter, ProviderError,
-                   RetryableProviderError, TextChunk, ToolCallChunk)
+                   ProviderToolExchange, RetryableProviderError, TextChunk, ToolCallChunk)
+from ..tool_protocol import provider_tool_name
 from ..models import OllamaModel, OllamaModels
 from ..pricing import TokenUsage
 
@@ -67,13 +68,23 @@ class OllamaProvider(ProviderAdapter):
 
     async def stream_reply(self, messages: list[Message], *, api_key=None,
                            max_tokens: int = 512,
-                           tools: list[dict] | None = None) -> AsyncIterator[TextChunk | ToolCallChunk]:
+                           tools: list[dict] | None = None,
+                           tool_exchange: ProviderToolExchange | None = None,
+                           disable_tools: bool = False) -> AsyncIterator[TextChunk | ToolCallChunk]:
         self.usage = TokenUsage()
+        conversation = [m.model_dump() for m in messages]
+        if tool_exchange:
+            name = provider_tool_name(tool_exchange.tool_name)
+            conversation.extend([{
+                'role': 'assistant', 'content': tool_exchange.assistant_text,
+                'tool_calls': [{'type': 'function', 'function': {
+                    'name': name, 'arguments': tool_exchange.arguments}}]
+            }, {'role': 'tool', 'tool_name': name, 'content': tool_exchange.result}])
         request = {
-            'model': self.model, 'messages': [m.model_dump() for m in messages],
+            'model': self.model, 'messages': conversation,
             'stream': True, 'options': {'num_predict': max_tokens},
         }
-        if tools:
+        if tools and not disable_tools:
             request['tools'] = [{'type': 'function', 'function': tool} for tool in tools]
         try:
             async with self.client() as client:

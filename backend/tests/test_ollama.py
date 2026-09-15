@@ -3,7 +3,7 @@ import json
 
 import httpx
 
-from zerocost.providers.base import (Message, TextChunk, ToolCallChunk, PermanentProviderError, ProviderError,
+from zerocost.providers.base import (Message, ProviderToolExchange, TextChunk, ToolCallChunk, PermanentProviderError, ProviderError,
                                      RetryableProviderError)
 from zerocost.providers.ollama import OllamaProvider
 
@@ -27,6 +27,28 @@ def test_native_tool_call_is_sent_and_emitted():
             [Message(role='user', content='ara')], tools=tools)]
         assert events == [ToolCallChunk(0, 'ollama-provider', 'knowledge_search',
                                         '{"query":"kanıt"}', True)]
+    asyncio.run(scenario())
+
+
+def test_ollama_tool_result_is_a_tool_message_and_final_request_omits_tools():
+    exchange = ProviderToolExchange('internal', '', 'terminal.execute',
+                                    {'command': ['npm', 'test']}, 'tests passed')
+
+    async def handler(request):
+        body = json.loads(request.content)
+        assert 'tools' not in body
+        assert body['messages'][-2]['tool_calls'][0]['function']['name'] == 'terminal_execute'
+        assert body['messages'][-1] == {
+            'role': 'tool', 'tool_name': 'terminal_execute', 'content': 'tests passed'}
+        return httpx.Response(200, content=json.dumps({
+            'message': {'role': 'assistant', 'content': 'done'}, 'done': True}) + '\n')
+
+    async def scenario():
+        provider = OllamaProvider('model', httpx.MockTransport(handler))
+        events = [event async for event in provider.stream_reply(
+            [Message(role='user', content='test')], tools=[{'name': 'terminal_execute'}],
+            tool_exchange=exchange, disable_tools=True)]
+        assert events == [TextChunk('done')]
     asyncio.run(scenario())
 
 

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import AsyncIterator
+from typing import AsyncIterator, Any
 from dataclasses import dataclass
 from pydantic import BaseModel
 from typing import Literal
@@ -26,6 +26,17 @@ class ToolCallChunk:
     name_delta: str = ""
     arguments_delta: str = ""
     is_final: bool = False
+
+
+@dataclass(frozen=True)
+class ProviderToolExchange:
+    """The completed tool turn that a provider must continue."""
+    internal_call_id: str
+    provider_call_id: str
+    tool_name: str
+    arguments: dict[str, Any]
+    result: str
+    assistant_text: str = ""
 
 
 class ProviderError(Exception):
@@ -78,6 +89,8 @@ class ProviderAdapter(ABC):
     @abstractmethod
     def stream_reply(self, messages: list[Message], *, api_key=None,
                      max_tokens: int = 512,
-                     tools: list[dict] | None = None) -> AsyncIterator[TextChunk | ToolCallChunk]:
+                     tools: list[dict] | None = None,
+                     tool_exchange: ProviderToolExchange | None = None,
+                     disable_tools: bool = False) -> AsyncIterator[TextChunk | ToolCallChunk]:
         """Yield typed text/tool deltas and require a verified provider end marker."""
         raise NotImplementedError

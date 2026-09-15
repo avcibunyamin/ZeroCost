@@ -4,7 +4,8 @@ import re
 from typing import AsyncIterator
 import httpx
 from .base import (Message, PermanentProviderError, ProviderAdapter, ProviderError,
-                   RetryableProviderError, TextChunk, ToolCallChunk)
+                   ProviderToolExchange, RetryableProviderError, TextChunk, ToolCallChunk)
+from ..tool_protocol import provider_tool_name
 from ..models import OllamaModel, OllamaModels
 from ..pricing import TokenUsage
 
@@ -78,12 +79,25 @@ class OpenAIProvider(ProviderAdapter):
 
     async def stream_reply(self, messages: list[Message], *, api_key=None,
                            max_tokens: int = 512,
-                           tools: list[dict] | None = None) -> AsyncIterator[TextChunk | ToolCallChunk]:
+                           tools: list[dict] | None = None,
+                           tool_exchange: ProviderToolExchange | None = None,
+                           disable_tools: bool = False) -> AsyncIterator[TextChunk | ToolCallChunk]:
         self.usage = TokenUsage()
         self._key(api_key)
+        conversation = [message.model_dump() for message in messages]
+        if tool_exchange:
+            call_id = tool_exchange.provider_call_id or tool_exchange.internal_call_id
+            conversation.extend([{
+                "role": "assistant", "content": tool_exchange.assistant_text or None,
+                "tool_calls": [{"id": call_id, "type": "function", "function": {
+                    "name": provider_tool_name(tool_exchange.tool_name),
+                    "arguments": json.dumps(tool_exchange.arguments, ensure_ascii=False,
+                                             sort_keys=True, separators=(",", ":"))}}]
+            }, {"role": "tool", "tool_call_id": call_id,
+                "content": tool_exchange.result}])
         request = {
             "model": self.model,
-            "messages": [message.model_dump() for message in messages],
+            "messages": conversation,
             "stream": True,
             "stream_options": {"include_usage": True},
         }
@@ -95,6 +109,9 @@ class OpenAIProvider(ProviderAdapter):
         request[token_parameter] = max_tokens
         if tools:
             request["tools"] = [{"type": "function", "function": tool} for tool in tools]
+            request["parallel_tool_calls"] = False
+            if disable_tools:
+                request["tool_choice"] = "none"
         try:
             async with self.client(api_key) as client:
                 async with client.stream("POST", "/chat/completions",

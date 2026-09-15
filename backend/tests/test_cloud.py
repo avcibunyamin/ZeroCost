@@ -6,7 +6,7 @@ from pydantic import SecretStr
 from google import genai
 from zerocost.providers.cloud import AnthropicProvider, GeminiProvider
 from zerocost.providers.openai_compatible import OpenAIProvider
-from zerocost.providers.base import (Message, TextChunk, ToolCallChunk, PermanentProviderError, ProviderError, RetryableProviderError,
+from zerocost.providers.base import (Message, ProviderToolExchange, TextChunk, ToolCallChunk, PermanentProviderError, ProviderError, RetryableProviderError,
                                      provider_exception)
 from zerocost.pricing import TokenUsage
 from zerocost.models import ConnectionInput, OllamaModel, OllamaModels
@@ -106,6 +106,64 @@ def test_gemini_streams_native_function_call():
         assert events == [ToolCallChunk(0, 'gemini-provider', 'workspace_write',
                                         '{"path":"README.md"}', True)]
         assert provider.usage == TokenUsage(2, 1)
+    asyncio.run(run())
+
+
+def test_anthropic_final_tool_result_uses_tool_result_block_and_none_choice():
+    exchange = ProviderToolExchange('internal', 'toolu-provider', 'workspace.write',
+                                    {'path': 'README.md'}, 'written')
+    def handler(request):
+        body = json.loads(request.content)
+        assert body['tool_choice'] == {'type': 'none'}
+        assert body['messages'][-2]['content'][-1]['type'] == 'tool_use'
+        assert body['messages'][-1]['content'][0] == {
+            'type': 'tool_result', 'tool_use_id': 'toolu-provider', 'content': 'written'}
+        frames = [
+            ('message_start', {'type': 'message_start', 'message': {'id': 'msg', 'type': 'message',
+                'role': 'assistant', 'model': 'test', 'content': [], 'stop_reason': None,
+                'stop_sequence': None, 'usage': {'input_tokens': 2, 'output_tokens': 0}}}),
+            ('content_block_start', {'type': 'content_block_start', 'index': 0,
+                'content_block': {'type': 'text', 'text': ''}}),
+            ('content_block_delta', {'type': 'content_block_delta', 'index': 0,
+                'delta': {'type': 'text_delta', 'text': 'done'}}),
+            ('content_block_stop', {'type': 'content_block_stop', 'index': 0}),
+            ('message_delta', {'type': 'message_delta', 'delta': {'stop_reason': 'end_turn',
+                'stop_sequence': None}, 'usage': {'output_tokens': 1}}),
+            ('message_stop', {'type': 'message_stop'}),
+        ]
+        return httpx.Response(200, headers={'content-type': 'text/event-stream'},
+            text=''.join(f'event: {kind}\ndata: {json.dumps(data)}\n\n' for kind, data in frames))
+    async def run():
+        provider = AnthropicProvider('test', transport=httpx.MockTransport(handler))
+        assert [event async for event in provider.stream_reply(
+            MESSAGES, api_key=SecretStr('synthetic-key'), tools=TOOLS,
+            tool_exchange=exchange, disable_tools=True)] == [TextChunk('done')]
+    asyncio.run(run())
+
+
+def test_gemini_final_tool_result_uses_function_response_and_none_mode():
+    exchange = ProviderToolExchange('internal', 'gemini-provider', 'workspace.write',
+                                    {'path': 'README.md'}, 'written')
+    def handler(request):
+        body = json.loads(request.content)
+        assert body['toolConfig']['function_calling_config']['mode'] == 'NONE'
+        assert body['contents'][-2]['parts'][-1]['functionCall']['id'] == 'gemini-provider'
+        response = body['contents'][-1]['parts'][0]['functionResponse']
+        assert response == {'id': 'gemini-provider', 'name': 'workspace_write',
+                            'response': {'output': 'written'}}
+        candidate = {'content': {'role': 'model', 'parts': [{'text': 'done'}]},
+                     'finishReason': 'STOP'}
+        return httpx.Response(200, headers={'content-type': 'text/event-stream'},
+            text='data: ' + json.dumps({'candidates': [candidate]}) + '\n\n')
+    def factory(**kwargs):
+        kwargs['http_options'].httpx_async_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler))
+        return genai.Client(**kwargs)
+    async def run():
+        provider = GeminiProvider('test', client_factory=factory)
+        assert [event async for event in provider.stream_reply(
+            MESSAGES, api_key=SecretStr('synthetic-key'), tools=TOOLS,
+            tool_exchange=exchange, disable_tools=True)] == [TextChunk('done')]
     asyncio.run(run())
 
 
@@ -221,6 +279,30 @@ def test_openai_compatible_stream_auth_done_and_usage():
             MESSAGES, api_key=SecretStr('synthetic-key'))]
         assert tokens == [TextChunk('mer'), TextChunk('haba')]
         assert provider.usage == TokenUsage(3, 2)
+    asyncio.run(run())
+
+
+def test_openai_final_tool_result_uses_same_call_and_disables_tools():
+    exchange = ProviderToolExchange('internal-1', 'provider-1', 'workspace.write',
+                                    {'path': 'a.md', 'content': 'new'},
+                                    'File written: a.md (3 bytes).')
+
+    def handler(request):
+        body = json.loads(request.content)
+        assert body['tool_choice'] == 'none' and body['parallel_tool_calls'] is False
+        assert body['messages'][-2]['tool_calls'][0]['id'] == 'provider-1'
+        assert body['messages'][-2]['tool_calls'][0]['function']['name'] == 'workspace_write'
+        assert body['messages'][-1] == {'role': 'tool', 'tool_call_id': 'provider-1',
+                                      'content': exchange.result}
+        return httpx.Response(200, headers={'content-type': 'text/event-stream'},
+            text='data: {"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
+
+    async def run():
+        provider = OpenAIProvider('gpt-4o-mini', transport=httpx.MockTransport(handler))
+        events = [event async for event in provider.stream_reply(
+            MESSAGES, api_key=SecretStr('synthetic-key'), tools=TOOLS,
+            tool_exchange=exchange, disable_tools=True)]
+        assert events == [TextChunk('done')]
     asyncio.run(run())
 
 

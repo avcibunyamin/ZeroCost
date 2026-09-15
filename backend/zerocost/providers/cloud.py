@@ -6,8 +6,9 @@ from anthropic import AsyncAnthropic
 from google import genai
 from google.genai import types
 from .base import (PermanentProviderError, ProviderAdapter, ProviderError,
-                   RetryableProviderError, TextChunk, ToolCallChunk,
+                   ProviderToolExchange, RetryableProviderError, TextChunk, ToolCallChunk,
                    provider_exception)
+from ..tool_protocol import provider_tool_name
 from ..pricing import TokenUsage
 
 # SDK debug logging may include HTTP headers; it must never be enabled in the sidecar.
@@ -34,7 +35,8 @@ class AnthropicProvider(ProviderAdapter):
         self.usage = TokenUsage()
 
     async def stream_reply(self, messages, *, api_key=None, max_tokens=512,
-                           tools=None):
+                           tools=None, tool_exchange: ProviderToolExchange | None = None,
+                           disable_tools=False):
         self.usage = TokenUsage()
         key = require_key(api_key)
         system, conversation = split_messages(messages)
@@ -42,12 +44,29 @@ class AnthropicProvider(ProviderAdapter):
             async with httpx.AsyncClient(trust_env=False, follow_redirects=False, timeout=90, transport=self.transport) as http:
                 async with self.client_factory(api_key=key, base_url='https://api.anthropic.com',
                                                max_retries=0, http_client=http) as client:
+                    provider_messages = [m.model_dump() for m in conversation]
+                    if tool_exchange:
+                        blocks = []
+                        if tool_exchange.assistant_text:
+                            blocks.append({'type': 'text', 'text': tool_exchange.assistant_text})
+                        blocks.append({'type': 'tool_use',
+                            'id': tool_exchange.provider_call_id or tool_exchange.internal_call_id,
+                            'name': provider_tool_name(tool_exchange.tool_name),
+                            'input': tool_exchange.arguments})
+                        provider_messages.extend([
+                            {'role': 'assistant', 'content': blocks},
+                            {'role': 'user', 'content': [{'type': 'tool_result',
+                                'tool_use_id': tool_exchange.provider_call_id or tool_exchange.internal_call_id,
+                                'content': tool_exchange.result}]},
+                        ])
                     options = dict(model=self.model, system=system, max_tokens=max_tokens,
-                                   messages=[m.model_dump() for m in conversation])
+                                   messages=provider_messages)
                     if tools:
                         options['tools'] = [{'name': tool['name'],
                                              'description': tool['description'],
                                              'input_schema': tool['parameters']} for tool in tools]
+                        if disable_tools:
+                            options['tool_choice'] = {'type': 'none'}
                     async with client.messages.stream(**options) as stream:
                         ended = False
                         tool_indexes = set()
@@ -93,7 +112,8 @@ class GeminiProvider(ProviderAdapter):
         self.usage = TokenUsage()
 
     async def stream_reply(self, messages, *, api_key=None, max_tokens=512,
-                           tools=None):
+                           tools=None, tool_exchange: ProviderToolExchange | None = None,
+                           disable_tools=False):
         self.usage = TokenUsage()
         key = require_key(api_key)
         system, conversation = split_messages(messages)
@@ -104,8 +124,26 @@ class GeminiProvider(ProviderAdapter):
             config.tools = [types.Tool(function_declarations=[types.FunctionDeclaration(
                 name=tool['name'], description=tool['description'],
                 parameters_json_schema=tool['parameters']) for tool in tools])]
+            if disable_tools:
+                config.tool_config = types.ToolConfig(function_calling_config=
+                    types.FunctionCallingConfig(mode='NONE'))
         contents = [types.Content(role='model' if m.role == 'assistant' else 'user',
                     parts=[types.Part.from_text(text=m.content)]) for m in conversation]
+        if tool_exchange:
+            name = provider_tool_name(tool_exchange.tool_name)
+            assistant_parts = []
+            if tool_exchange.assistant_text:
+                assistant_parts.append(types.Part.from_text(text=tool_exchange.assistant_text))
+            assistant_parts.append(types.Part(function_call=types.FunctionCall(
+                id=tool_exchange.provider_call_id or tool_exchange.internal_call_id,
+                name=name, args=tool_exchange.arguments)))
+            contents.extend([
+                types.Content(role='model', parts=assistant_parts),
+                types.Content(role='user', parts=[types.Part(function_response=
+                    types.FunctionResponse(
+                        id=tool_exchange.provider_call_id or tool_exchange.internal_call_id,
+                        name=name, response={'output': tool_exchange.result}))]),
+            ])
         client = None
         try:
             client = self.client_factory(api_key=key, vertexai=False, http_options=types.HttpOptions(

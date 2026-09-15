@@ -1,7 +1,8 @@
 import pytest
 
 from zerocost.providers.base import PermanentProviderError, ToolCallChunk
-from zerocost.tool_protocol import ToolCallAssembler, tool_declarations
+from zerocost.tool_protocol import (ToolCallAssembler, tool_declarations,
+                                    tool_result_for_model)
 
 
 def test_streamed_tool_call_fragments_converge_to_provider_neutral_shape():
@@ -32,3 +33,12 @@ def test_tool_declarations_only_expose_enabled_capabilities():
     declarations = tool_declarations(['workspace.write'], ['collection-a'])
     assert [item['name'] for item in declarations] == ['workspace_write', 'knowledge_search']
     assert declarations[1]['parameters']['properties']['collection_id']['enum'] == ['collection-a']
+
+
+def test_model_tool_results_are_bounded_and_write_results_are_compact():
+    result = '\n'.join(f'line {index}' for index in range(250))
+    bounded = tool_result_for_model('terminal.execute', result, {})
+    assert bounded.startswith('[output truncated, showing last 200 lines]')
+    assert 'line 0' not in bounded and 'line 249' in bounded
+    assert tool_result_for_model('workspace.write', 'ignored', {
+        'path': 'notes.md', 'content': 'ş'}) == 'File written: notes.md (2 bytes).'

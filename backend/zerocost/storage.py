@@ -1153,15 +1153,24 @@ class Store:
                 self.db.execute("""UPDATE orchestration_runs SET tool_status=?,tool_result=?
                     WHERE run_id=?""", (legacy, result[:65536], run_id))
 
-    def tool_status(self, run_id: str):
-        call = self.db.execute("""SELECT id,status,result,content_hash,arguments
-            FROM tool_calls WHERE run_id=? ORDER BY created_at DESC,sequence DESC LIMIT 1""",
-            (run_id,)).fetchone()
+    def tool_status(self, run_id: str, call_id: str = ''):
+        if call_id:
+            call = self.db.execute("""SELECT id,status,result,content_hash,arguments,
+                provider_call_id,tool_name,node_name,sequence FROM tool_calls WHERE id=?""",
+                (call_id,)).fetchone()
+        else:
+            call = self.db.execute("""SELECT id,status,result,content_hash,arguments,
+                provider_call_id,tool_name,node_name,sequence
+                FROM tool_calls WHERE run_id=? ORDER BY created_at DESC,sequence DESC LIMIT 1""",
+                (run_id,)).fetchone()
         if call:
             return {'id': call['id'], 'tool_status': call['status'],
                     'tool_result': call['result'] or '',
                     'tool_content_hash': call['content_hash'] or '',
-                    'arguments': json.loads(call['arguments'])}
+                    'arguments': json.loads(call['arguments']),
+                    'provider_call_id': call['provider_call_id'] or '',
+                    'tool_name': call['tool_name'], 'node_name': call['node_name'],
+                    'sequence': call['sequence']}
         row = self.db.execute("""SELECT tool_status,tool_result,tool_content_hash
             FROM orchestration_runs WHERE run_id=?""", (run_id,)).fetchone()
         return dict(row) if row else None
