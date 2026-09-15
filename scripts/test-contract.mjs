@@ -47,7 +47,7 @@ test("orchestration and workspace responses are closed", () => {
           { sequence: 3, from_status: "running", to_status: "completed",
             reason: "Görev tamamlandı.", timestamp: "2026-09-14T07:00:02Z" },
         ],
-        tool_action: null,
+        tool_calls: [], tool_action: null,
         status: "completed", error: "", messages: [
           { sequence: 1, agent_id: "a", phase: "analysis", content: "view" },
         ],
@@ -204,7 +204,8 @@ test("skill manifests and assignments are typed and closed", () => {
     result: {
       ...valid.result,
       connections: [{ id: "c", name: "Local", provider: "ollama",
-        model_id: "qwen", base_url: "", status: "unconfigured" }],
+        model_id: "qwen", base_url: "", supports_tools: "unknown",
+        status: "unconfigured" }],
       agents: [{ id: "a", name: "Reviewer", role: "review", connection_id: "c",
         instructions: "", fallback_connection_ids: [],
         permissions: ["workspace.read"], skill_ids: ["s"] }],

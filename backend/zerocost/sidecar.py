@@ -6,7 +6,7 @@ from filelock import FileLock
 from .models import Accepted, StreamChunk, StreamEnd, StreamError
 from .providers import get_provider
 from .providers.ollama import OllamaProvider
-from .providers.base import Message, ProviderError
+from .providers.base import Message, ProviderError, TextChunk, ToolCallChunk
 import json
 from pathlib import Path
 import sqlite3
@@ -52,6 +52,9 @@ def dispatch(store: Store, raw: str):
             store.set_agent_permissions(request.params.agent_id, request.params.permissions)
         elif request.method == "agent.fallbacks.set":
             store.set_agent_fallbacks(request.params.agent_id, request.params.connection_ids)
+        elif request.method == "connection.tools.set":
+            store.set_connection_tools(request.params.connection_id,
+                                       request.params.supports_tools)
         elif request.method == "workspace.list":
             return Success(request_id=request.request_id, result=list_directory(
                 store, request.params.agent_id, request.params.workspace_id, request.params.path))
@@ -224,7 +227,12 @@ class ChatService:
             async def generate():
                 nonlocal content, sequence, persisted
                 stream = provider.stream_reply(messages, api_key=api_key) if api_key else provider.stream_reply(messages)
-                async for token in stream:
+                async for event in stream:
+                    if isinstance(event, ToolCallChunk):
+                        raise ProviderError('Normal sohbet beklenmeyen bir araç çağrısı döndürdü.')
+                    token = event.text if isinstance(event, TextChunk) else event
+                    if not isinstance(token, str):
+                        raise ProviderError('Sağlayıcı bilinmeyen bir akış olayı gönderdi.')
                     if len(content) + len(token) > 128000:
                         raise ProviderError('Yanıt uzunluk sınırına ulaştı.')
                     content += token
@@ -468,14 +476,16 @@ class ChatService:
                         self.store, agent, enabled_tools=spec['enabled_tools'],
                         has_knowledge=bool(spec['knowledge_collection_ids']))
                 params = SimpleNamespace(**spec)
+                persisted_tool = self.store.tool_status(params.run_id) or {}
+                current_tool_status = persisted_tool.get('tool_status', spec['tool_status'])
                 uncertain = (spec['error_class'] == 'uncertain_tool' and
-                             spec['tool_status'] in ('uncertain', 'completed'))
+                             current_tool_status in ('uncertain', 'completed'))
                 if uncertain and request.params.decision == 'reject':
                     self.store.finish_orchestration(
                         params.run_id, 'cancelled', 'Belirsiz araç sonucu nedeniyle kullanıcı görevi durdurdu.')
                     result = Accepted(run_id=params.run_id)
                     return Success(request_id=request.request_id, result=result)
-                if spec['tool_status'] == 'waiting':
+                if current_tool_status in ('waiting', 'pending'):
                     self.store.update_tool_action(params.run_id, 'approved')
                 self.store.enqueue_orchestration(params.run_id, resumed=True)
                 spec = self.store.orchestration_spec(params.run_id)

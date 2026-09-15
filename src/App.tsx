@@ -134,6 +134,7 @@ export default function App() {
           provider: field("provider") as ConnectionInput["provider"],
           model_id: field("model_id"),
           base_url: field("base_url"),
+          supports_tools: field("supports_tools") as ConnectionInput["supports_tools"],
         };
         result = await send({ method: "connection.create", params });
       } else if (modal === "agent") {
@@ -222,6 +223,20 @@ export default function App() {
       setNotice(
         permissions.includes(permission) ? "Ajan izni verildi." : "Ajan izni kaldırıldı.",
       );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+  async function setConnectionTools(connectionId: string,
+                                    supportsTools: ConnectionInput["supports_tools"]) {
+    setLoading(true);
+    setError("");
+    try {
+      setSnapshot(await send({ method: "connection.tools.set", params: {
+        connection_id: connectionId, supports_tools: supportsTools,
+      } }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -318,6 +333,16 @@ export default function App() {
           {(["openai", "lmstudio"] as string[]).includes(connection.provider) && (
             <ConnectionModelProbe connection={connection} />
           )}
+          <label className="tool-capability">
+            Araç çağırma
+            <select value={connection.supports_tools} disabled={loading}
+              onChange={(event) => void setConnectionTools(
+                connection.id, event.target.value as ConnectionInput["supports_tools"])}>
+              <option value="unknown">Otomatik dene</option>
+              <option value="true">Native destekli</option>
+              <option value="false">Fenced JSON</option>
+            </select>
+          </label>
         </div>
       ))}
     </div>
@@ -1074,6 +1099,15 @@ export default function App() {
                   </label>}
                   {connectionProvider === "openai" && <input type="hidden" name="base_url"
                     value="https://api.openai.com/v1" />}
+                  <label>
+                    Araç çağırma
+                    <select name="supports_tools" defaultValue="unknown">
+                      <option value="unknown">Otomatik dene</option>
+                      <option value="true">Native destekli</option>
+                      <option value="false">Fenced JSON kullan</option>
+                    </select>
+                    <small>Bilinmiyorsa native format denenir; model metin döndürürse güvenli JSON fallback'i korunur.</small>
+                  </label>
                   <label>
                     Model kimliği
                     <input

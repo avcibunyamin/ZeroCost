@@ -2,7 +2,7 @@ import json
 from typing import AsyncIterator
 import httpx
 from .base import (Message, PermanentProviderError, ProviderAdapter, ProviderError,
-                   RetryableProviderError)
+                   RetryableProviderError, TextChunk, ToolCallChunk)
 from ..models import OllamaModel, OllamaModels
 from ..pricing import TokenUsage
 
@@ -19,6 +19,30 @@ class OllamaProvider(ProviderAdapter):
         return httpx.AsyncClient(base_url=OLLAMA_URL, transport=self.transport,
                                  timeout=httpx.Timeout(90, connect=3), trust_env=False,
                                  follow_redirects=False)
+
+    @staticmethod
+    def _message_events(message):
+        if not isinstance(message, dict):
+            raise ProviderError('Ollama mesaj biçimi geçersiz.')
+        token = message.get('content', '')
+        if not isinstance(token, str):
+            raise ProviderError('Ollama metin biçimi geçersiz.')
+        events = [TextChunk(token)] if token else []
+        calls = message.get('tool_calls', [])
+        if not isinstance(calls, list):
+            raise ProviderError('Ollama araç çağrısı biçimi geçersiz.')
+        for index, call in enumerate(calls):
+            function = call.get('function') if isinstance(call, dict) else None
+            name = function.get('name') if isinstance(function, dict) else None
+            arguments = function.get('arguments') if isinstance(function, dict) else None
+            if not isinstance(name, str) or not isinstance(arguments, dict):
+                raise ProviderError('Ollama araç çağrısı biçimi geçersiz.')
+            events.append(ToolCallChunk(index=index,
+                provider_call_id=str(call.get('id') or ''), name_delta=name,
+                arguments_delta=json.dumps(arguments, ensure_ascii=False,
+                                           sort_keys=True, separators=(',', ':')),
+                is_final=True))
+        return events
 
     async def list_models(self) -> OllamaModels:
         try:
@@ -42,14 +66,18 @@ class OllamaProvider(ProviderAdapter):
             raise ProviderError('Ollama modelleri okunamadı. Ollama uygulamasının açık olduğunu kontrol edin.') from exc
 
     async def stream_reply(self, messages: list[Message], *, api_key=None,
-                           max_tokens: int = 512) -> AsyncIterator[str]:
+                           max_tokens: int = 512,
+                           tools: list[dict] | None = None) -> AsyncIterator[TextChunk | ToolCallChunk]:
         self.usage = TokenUsage()
+        request = {
+            'model': self.model, 'messages': [m.model_dump() for m in messages],
+            'stream': True, 'options': {'num_predict': max_tokens},
+        }
+        if tools:
+            request['tools'] = [{'type': 'function', 'function': tool} for tool in tools]
         try:
             async with self.client() as client:
-                async with client.stream('POST', '/api/chat', json={
-                    'model': self.model, 'messages': [m.model_dump() for m in messages],
-                    'stream': True, 'options': {'num_predict': max_tokens},
-                }) as response:
+                async with client.stream('POST', '/api/chat', json=request) as response:
                     if response.status_code == 404:
                         raise PermanentProviderError('Model bulunamadı. Kurulu bir Ollama modeli seçin.')
                     if response.status_code >= 300:
@@ -78,14 +106,8 @@ class OllamaProvider(ProviderAdapter):
                             data = json.loads(line)
                             if not isinstance(data, dict) or data.get('error'):
                                 raise ProviderError('Ollama üretim sırasında hata bildirdi.')
-                            message = data.get('message', {})
-                            if not isinstance(message, dict):
-                                raise ProviderError('Ollama mesaj biçimi geçersiz.')
-                            token = message.get('content', '')
-                            if not isinstance(token, str):
-                                raise ProviderError('Ollama metin biçimi geçersiz.')
-                            if token:
-                                yield token
+                            for event in self._message_events(data.get('message', {})):
+                                yield event
                             if data.get('done') is True:
                                 self.usage = TokenUsage(int(data.get('prompt_eval_count', 0)),
                                                         int(data.get('eval_count', 0)))
@@ -94,11 +116,8 @@ class OllamaProvider(ProviderAdapter):
                     if buffer.strip():
                         data = json.loads(buffer)
                         if isinstance(data, dict) and data.get('done') is True and not data.get('error'):
-                            token = data.get('message', {}).get('content', '')
-                            if not isinstance(token, str):
-                                raise ProviderError('Ollama metin biçimi geçersiz.')
-                            if token:
-                                yield token
+                            for event in self._message_events(data.get('message', {})):
+                                yield event
                             self.usage = TokenUsage(int(data.get('prompt_eval_count', 0)),
                                                     int(data.get('eval_count', 0)))
                             return

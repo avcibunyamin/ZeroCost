@@ -12,7 +12,7 @@ from zerocost.models import (AgentInput, ConnectionInput, WorkspaceInput,
                              WorkflowTemplateInput)
 from zerocost.sidecar import ChatService, dispatch
 from zerocost.storage import Store
-from zerocost.providers.base import (Message, PermanentProviderError, ProviderError,
+from zerocost.providers.base import (Message, TextChunk, ToolCallChunk, PermanentProviderError, ProviderError,
                                      RetryableProviderError)
 from zerocost.pricing import TokenUsage
 from zerocost.workspace_tools import apply_write, prepare_write
@@ -60,6 +60,18 @@ def test_openai_and_lmstudio_connection_profiles_normalize_safe_endpoints(store)
     connections = {connection.provider: connection for connection in store.snapshot().connections}
     assert connections['openai'].base_url == 'https://api.openai.com/v1'
     assert connections['lmstudio'].base_url == 'http://localhost:1234/v1'
+
+
+def test_connection_tool_capability_is_explicit_and_validated(store):
+    store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='qwen'))
+    connection = store.snapshot().connections[0]
+    assert connection.supports_tools == 'unknown'
+    changed = dispatch(store, request(
+        'connection.tools.set', connection_id=connection.id, supports_tools='true'))
+    assert changed.ok and changed.result.connections[0].supports_tools == 'true'
+    rejected = dispatch(store, request(
+        'connection.tools.set', connection_id=connection.id, supports_tools='maybe'))
+    assert not rejected.ok
 
 
 @pytest.mark.parametrize('endpoint', [
@@ -214,7 +226,7 @@ def test_v4_orchestration_migrates_with_budget_defaults(tmp_path):
 
     migrated = Store(path)
     run = migrated.orchestration_history().runs[0]
-    assert migrated.snapshot().database_version == 17
+    assert migrated.snapshot().database_version == 18
     assert run.routing_mode == 'manual' and run.max_model_calls == 5
     assert run.agent_ids == [a.id for a in agents]
     assert migrated.db.execute('PRAGMA foreign_key_check').fetchall() == []
@@ -374,7 +386,7 @@ def test_v8_knowledge_data_migrates_to_versioned_hash_cache(tmp_path):
 
     migrated = Store(path)
     source = migrated.knowledge_source_hash(collection_id, workspace.id, 'legacy.md')
-    assert migrated.snapshot().database_version == 17
+    assert migrated.snapshot().database_version == 18
     assert source == {'content_hash': 'old-hash', 'status': 'ready', 'index_version': 'legacy-v8'}
     assert migrated.search_knowledge_fts(collection_id, 'korunan')[0]['content'] == 'korunan içerik'
     assert migrated.db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
@@ -1259,6 +1271,32 @@ def test_recovery_preserves_tool_hashes_and_detects_applied_write(tmp_path):
     store.close()
 
 
+def test_tool_call_identity_is_idempotent_and_rejects_changed_arguments(tmp_path):
+    root = tmp_path / 'project'
+    root.mkdir()
+    store = Store(tmp_path / 'tool-id.sqlite3')
+    store.create_connection(ConnectionInput(name='Local', provider='ollama', model_id='test'))
+    connection = store.snapshot().connections[0]
+    for name in ('A', 'B'):
+        store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+    agents = store.snapshot().agents
+    store.set_agent_permissions(agents[0].id, ['workspace.write'])
+    store.create_workspace(WorkspaceInput(name='Project', path=str(root)))
+    workspace = store.snapshot().workspaces[0]
+    store.start_orchestration('stable-call', 'Write', 1, [agent.id for agent in agents],
+        workspace_id=workspace.id, enabled_tools=['workspace.write'])
+    proposal = prepare_write(store, agents[0].id, workspace.id, 'result.md', 'one')
+    first = store.set_tool_action('stable-call', proposal, provider_call_id='provider-a')
+    second = store.set_tool_action('stable-call', proposal, provider_call_id='provider-b')
+    assert first == second
+    call = store.orchestration_history().runs[0].tool_calls[0]
+    assert call.provider_call_id == 'provider-b'
+    changed = prepare_write(store, agents[0].id, workspace.id, 'result.md', 'two')
+    with pytest.raises(ValueError, match='farklı argümanlarla'):
+        store.set_tool_action('stable-call', changed)
+    store.close()
+
+
 def test_recovery_marks_executing_terminal_uncertain_with_concrete_request(tmp_path):
     root = tmp_path / 'project'
     root.mkdir()
@@ -1330,7 +1368,7 @@ def test_uncertain_terminal_continues_checkpoint_without_reexecution(tmp_path, m
         except SimulatedProcessCrash:
             pass
         assert executions == 1
-        assert store.orchestration_spec('uncertain-run')['tool_status'] == 'executing'
+        assert store.tool_status('uncertain-run')['tool_status'] == 'executing'
         store.close()
 
         reopened = Store(path)
@@ -1501,6 +1539,57 @@ def test_model_write_proposal_waits_for_diff_approval_then_writes(tmp_path):
         assert complete.status == 'completed' and complete.tool_action.status == 'completed'
         assert any(event.type == 'orchestration_tool_result' for event in events)
         assert events[-1].sequence > approval_sequence
+        store.close()
+    asyncio.run(scenario())
+
+
+def test_native_tool_call_uses_internal_identity_and_waits_for_approval(tmp_path):
+    async def scenario():
+        root = tmp_path / 'project'
+        root.mkdir()
+        (root / 'result.md').write_text('old\n', encoding='utf-8')
+        store = Store(tmp_path / 'native-tool.sqlite3')
+        store.create_connection(ConnectionInput(
+            name='Native', provider='ollama', model_id='test', supports_tools='true'))
+        connection = store.snapshot().connections[0]
+        for name in ('Writer', 'Reviewer'):
+            store.create_agent(AgentInput(name=name, role='review', connection_id=connection.id))
+        store.create_workspace(WorkspaceInput(name='Project', path=str(root)))
+        agents, workspace = store.snapshot().agents, store.snapshot().workspaces[0]
+        for agent in agents:
+            store.set_agent_permissions(agent.id, ['workspace.write'])
+        calls = 0
+
+        class NativeProvider(FakeProvider):
+            async def stream_reply(self, messages, *, api_key=None, max_tokens=512, tools=None):
+                nonlocal calls
+                calls += 1
+                if calls < 3:
+                    yield TextChunk('görüş')
+                else:
+                    assert [item['name'] for item in tools] == ['workspace_write']
+                    yield ToolCallChunk(0, 'provider-call-99', 'workspace_write',
+                        '{"path":"result.md","content":"new\\n"}', True)
+
+        service = ChatService(store, lambda _: None, lambda *_: NativeProvider())
+        response = await service.handle(request(
+            'orchestration.start', run_id='native-write', objective='Dosyayı güncelle',
+            agent_ids=[agent.id for agent in agents], rounds=1, max_model_calls=3,
+            workspace_id=workspace.id, enabled_tools=['workspace.write']))
+        assert response.ok
+        await service.tasks['native-write']
+        run = store.orchestration_history().runs[0]
+        assert run.status == 'waiting_approval'
+        assert len(run.tool_calls) == 1
+        call = run.tool_calls[0]
+        assert call.id == __import__('hashlib').sha256(
+            b'native-write\0synthesize\x001').hexdigest()
+        assert call.provider_call_id == 'provider-call-99'
+        assert call.tool_name == 'workspace.write' and call.status == 'pending'
+        assert call.arguments == {'path': 'result.md', 'content': 'new\n'}
+        assert len(call.args_hash) == len(call.content_hash) == 64
+        assert (root / 'result.md').read_text() == 'old\n'
+        await service.close()
         store.close()
     asyncio.run(scenario())
 

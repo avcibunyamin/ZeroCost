@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import AsyncIterator
+from dataclasses import dataclass
 from pydantic import BaseModel
 from typing import Literal
 from ..pricing import TokenUsage
@@ -10,6 +11,21 @@ from ..pricing import TokenUsage
 class Message(BaseModel):
     role: Literal["system", "user", "assistant"]
     content: str
+
+
+@dataclass(frozen=True)
+class TextChunk:
+    text: str
+
+
+@dataclass(frozen=True)
+class ToolCallChunk:
+    """Provider-neutral fragment; orchestration owns the durable call identity."""
+    index: int
+    provider_call_id: str = ""
+    name_delta: str = ""
+    arguments_delta: str = ""
+    is_final: bool = False
 
 
 class ProviderError(Exception):
@@ -61,6 +77,7 @@ class ProviderAdapter(ABC):
     usage = TokenUsage()
     @abstractmethod
     def stream_reply(self, messages: list[Message], *, api_key=None,
-                     max_tokens: int = 512) -> AsyncIterator[str]:
-        """Yield content deltas. Return only on a verified provider end marker."""
+                     max_tokens: int = 512,
+                     tools: list[dict] | None = None) -> AsyncIterator[TextChunk | ToolCallChunk]:
+        """Yield typed text/tool deltas and require a verified provider end marker."""
         raise NotImplementedError

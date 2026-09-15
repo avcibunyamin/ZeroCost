@@ -954,7 +954,8 @@ main {
   width: 23px;
   height: 23px;
 }
-.model-call-audit > div {
+.model-call-audit > div,
+.tool-call-audit > div {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px 12px;
@@ -962,7 +963,8 @@ main {
   margin-top: 8px;
   border-top: 1px solid #e5ebe5;
 }
-.model-call-audit > div > span {
+.model-call-audit > div > span,
+.tool-call-audit > div > span {
   overflow-wrap: anywhere;
 }
 .model-call-audit > div > small:last-child:not(:nth-child(2)) {
@@ -1628,6 +1630,17 @@ textarea {
 .connection-row > .row-copy,
 .connection-row > .badge {
   margin-top: 7px;
+}
+.tool-capability {
+  display: grid;
+  gap: 4px;
+  min-width: 130px;
+  color: #78877b;
+  font-size: 9px;
+}
+.tool-capability select {
+  padding: 7px 9px;
+  font-size: 10px;
 }
 @media (max-width: 760px) {
   .connection-row {

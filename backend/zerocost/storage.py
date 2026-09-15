@@ -1,6 +1,7 @@
 """SQLite repository; schema changes are applied transactionally."""
 from __future__ import annotations
 from pathlib import Path
+from datetime import datetime, timezone
 import hashlib
 import json
 import math
@@ -11,7 +12,7 @@ from .models import (Agent, AgentInput, Connection, ConnectionInput, SkillPackag
                      SkillPackageInput, Snapshot, WorkflowSlotInput, WorkflowTemplate,
                      WorkflowTemplateInput, Workspace, WorkspaceInput)
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 
 class Store:
@@ -469,6 +470,35 @@ class Store:
                         ADD COLUMN pricing_warning TEXT NOT NULL DEFAULT ''""")
                 self.db.execute("PRAGMA user_version=17")
 
+        if current < 18:
+            with self.db:
+                connection_columns = {row['name'] for row in self.db.execute(
+                    "PRAGMA table_info(connections)")}
+                if 'supports_tools' not in connection_columns:
+                    self.db.execute("""ALTER TABLE connections ADD COLUMN
+                        supports_tools TEXT NOT NULL DEFAULT 'unknown'""")
+                self.db.execute("""CREATE TABLE IF NOT EXISTS tool_calls (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES orchestration_runs(run_id) ON DELETE CASCADE,
+                    node_name TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    provider_call_id TEXT NOT NULL DEFAULT '',
+                    tool_name TEXT NOT NULL CHECK(tool_name IN
+                        ('workspace.write','terminal.execute','knowledge.search')),
+                    arguments TEXT NOT NULL,
+                    args_hash TEXT NOT NULL,
+                    content_hash TEXT,
+                    status TEXT NOT NULL CHECK(status IN
+                        ('pending','approved','executing','completed','rejected','uncertain')),
+                    result TEXT,
+                    duration_ms INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(run_id,node_name,sequence)
+                )""")
+                self.db.execute("""CREATE INDEX IF NOT EXISTS tool_calls_run
+                    ON tool_calls(run_id,created_at,sequence)""")
+                self.db.execute("PRAGMA user_version=18")
+
     def close(self):
         self.db.close()
 
@@ -489,8 +519,17 @@ class Store:
     def create_connection(self, value: ConnectionInput):
         with self.db:
             self.db.execute("""INSERT INTO connections
-                (id,name,provider,model_id,base_url) VALUES (?, ?, ?, ?, ?)""",
-                (str(uuid4()), value.name, value.provider, value.model_id, value.base_url))
+                (id,name,provider,model_id,base_url,supports_tools)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (str(uuid4()), value.name, value.provider, value.model_id,
+                 value.base_url, value.supports_tools))
+
+    def set_connection_tools(self, connection_id: str, supports_tools: str):
+        with self.db:
+            changed = self.db.execute("UPDATE connections SET supports_tools=? WHERE id=?",
+                                      (supports_tools, connection_id)).rowcount
+        if not changed:
+            raise ValueError("Bağlantı bulunamadı.")
 
     def create_agent(self, value: AgentInput):
         with self.db:
@@ -790,6 +829,48 @@ class Store:
 
     def recover_runs(self):
         from .workspace_tools import current_write_hash
+        native = self.db.execute("""SELECT t.id,t.run_id,t.tool_name,t.arguments,
+                t.content_hash,r.status,r.workspace_id,
+                (SELECT agent_id FROM orchestration_participants p
+                 WHERE p.run_id=t.run_id ORDER BY position LIMIT 1) AS agent_id
+            FROM tool_calls t JOIN orchestration_runs r ON r.run_id=t.run_id
+            WHERE r.status IN ('running','queued') AND t.status='executing'""").fetchall()
+        recovered_ids = set()
+        for row in native:
+            applied = False
+            if row['tool_name'] == 'workspace.write':
+                try:
+                    arguments = json.loads(row['arguments'])
+                    proposal = {**arguments, 'agent_id': row['agent_id'],
+                                'workspace_id': row['workspace_id']}
+                    applied = current_write_hash(self, proposal) == row['content_hash']
+                except (ValueError, KeyError, json.JSONDecodeError, TypeError):
+                    pass
+            if applied:
+                message = 'Hedef içerik hash ile doğrulandı; yazma yeniden uygulanmadı.'
+                with self.db:
+                    self.db.execute("""UPDATE tool_calls SET status='completed',result=?
+                        WHERE id=?""", (message, row['id']))
+                    self.db.execute("""UPDATE orchestration_runs SET status='waiting_approval',
+                        error_class='uncertain_tool',
+                        error='Yazma tamamlandı; görev checkpoint üzerinden sürdürülebilir.'
+                        WHERE run_id=?""", (row['run_id'],))
+                    self._record_status_event(
+                        row['run_id'], row['status'], 'waiting_approval',
+                        'Yazma tamamlandı; hash doğrulandı ve yeniden uygulanmadı.')
+                recovered_ids.add(row['id'])
+        uncertain_native = [row for row in native if row['id'] not in recovered_ids]
+        with self.db:
+            for row in uncertain_native:
+                self.db.execute("UPDATE tool_calls SET status='uncertain' WHERE id=?",
+                                (row['id'],))
+                self.db.execute("""UPDATE orchestration_runs SET status='waiting_approval',
+                    error_class='uncertain_tool',
+                    error='Araç çalıştırılırken bağlantı kesildi; sonuç belirsiz.'
+                    WHERE run_id=?""", (row['run_id'],))
+                self._record_status_event(
+                    row['run_id'], row['status'], 'waiting_approval',
+                    'Araç çalıştırılırken bağlantı kesildi; sonuç belirsiz.')
         for row in self.db.execute("""SELECT run_id,status,tool_request,tool_content_hash
                 FROM orchestration_runs WHERE status IN ('running','queued') AND
                 tool_status='executing' AND tool_name='workspace.write'""").fetchall():
@@ -1022,27 +1103,65 @@ class Store:
                 'output_tokens': family['output_tokens'],
                 'actual_cost_microusd': family['cost']}
 
-    def set_tool_action(self, run_id: str, proposal: dict, status: str = 'waiting', result: str = ''):
-        public = {key: proposal.get(key) for key in (
-            'tool', 'path', 'command', 'cwd', 'workspace_id', 'agent_id',
-            'collection_id', 'query', 'limit')}
-        canonical = json.dumps(public, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+    @staticmethod
+    def _tool_arguments(proposal: dict):
+        if proposal['tool'] == 'workspace.write':
+            return {'path': proposal['path'], 'content': proposal['content']}
+        if proposal['tool'] == 'terminal.execute':
+            return {'command': proposal['command'], 'cwd': proposal.get('cwd', '')}
+        return {'collection_id': proposal['collection_id'], 'query': proposal['query'],
+                'limit': proposal.get('limit', 5)}
+
+    def set_tool_action(self, run_id: str, proposal: dict, status: str = 'pending',
+                        result: str = '', *, node_name: str = 'synthesize',
+                        sequence: int = 1, provider_call_id: str = ''):
+        arguments = self._tool_arguments(proposal)
+        canonical = json.dumps(arguments, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
         args_hash = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
         content_hash = (hashlib.sha256(proposal['content'].encode('utf-8')).hexdigest()
                         if proposal['tool'] == 'workspace.write' else '')
+        identifier = hashlib.sha256(
+            f'{run_id}\0{node_name}\0{sequence}'.encode('utf-8')).hexdigest()
+        stored_result = result or (proposal.get('preview', '') if status == 'pending' else '')
         with self.db:
-            self.db.execute("""UPDATE orchestration_runs SET tool_name=?,tool_request=?,
-                tool_preview=?,tool_risk=?,tool_status=?,tool_result=?,tool_args_hash=?,
-                tool_content_hash=? WHERE run_id=?""",
-                (proposal['tool'], json.dumps(public), proposal['preview'], proposal['risk'],
-                 status, result, args_hash, content_hash, run_id))
+            existing = self.db.execute(
+                "SELECT args_hash FROM tool_calls WHERE id=?", (identifier,)).fetchone()
+            if existing and existing['args_hash'] != args_hash:
+                raise ValueError('Aynı araç çağrısı kimliği farklı argümanlarla yeniden kullanılamaz.')
+            self.db.execute("""INSERT INTO tool_calls
+                (id,run_id,node_name,sequence,provider_call_id,tool_name,arguments,
+                 args_hash,content_hash,status,result,duration_ms,created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET provider_call_id=excluded.provider_call_id""",
+                (identifier, run_id, node_name, sequence, provider_call_id,
+                 proposal['tool'], canonical, args_hash, content_hash or None,
+                 status, stored_result or None, 0,
+                 datetime.now(timezone.utc).isoformat()))
+        return identifier
 
-    def update_tool_action(self, run_id: str, status: str, result: str = ''):
+    def update_tool_action(self, run_id: str, status: str, result: str = '',
+                           duration_ms: int = 0):
         with self.db:
-            self.db.execute("UPDATE orchestration_runs SET tool_status=?,tool_result=? WHERE run_id=?",
-                            (status, result[:65536], run_id))
+            call = self.db.execute("""SELECT id FROM tool_calls WHERE run_id=?
+                ORDER BY created_at DESC,sequence DESC LIMIT 1""", (run_id,)).fetchone()
+            if call:
+                self.db.execute("""UPDATE tool_calls SET status=?,result=?,duration_ms=?
+                    WHERE id=?""", (status, result[:65536] or None,
+                                     max(0, duration_ms), call['id']))
+            else:
+                legacy = 'waiting' if status == 'pending' else status
+                self.db.execute("""UPDATE orchestration_runs SET tool_status=?,tool_result=?
+                    WHERE run_id=?""", (legacy, result[:65536], run_id))
 
     def tool_status(self, run_id: str):
+        call = self.db.execute("""SELECT id,status,result,content_hash,arguments
+            FROM tool_calls WHERE run_id=? ORDER BY created_at DESC,sequence DESC LIMIT 1""",
+            (run_id,)).fetchone()
+        if call:
+            return {'id': call['id'], 'tool_status': call['status'],
+                    'tool_result': call['result'] or '',
+                    'tool_content_hash': call['content_hash'] or '',
+                    'arguments': json.loads(call['arguments'])}
         row = self.db.execute("""SELECT tool_status,tool_result,tool_content_hash
             FROM orchestration_runs WHERE run_id=?""", (run_id,)).fetchone()
         return dict(row) if row else None
@@ -1103,7 +1222,8 @@ class Store:
 
     def orchestration_history(self):
         from .models import (ModelCallAttempt, OrchestrationHistory, OrchestrationMessage,
-                             OrchestrationRun, OrchestrationStatusEvent, ToolAction)
+                             OrchestrationRun, OrchestrationStatusEvent, ToolAction,
+                             ToolCall)
         runs = []
         rows = self.db.execute("SELECT * FROM orchestration_runs ORDER BY created_at DESC,rowid DESC LIMIT 100")
         for row in rows:
@@ -1112,8 +1232,29 @@ class Store:
             messages = [OrchestrationMessage(**dict(item)) for item in self.db.execute(
                 "SELECT sequence,agent_id,phase,content FROM orchestration_messages WHERE run_id=? ORDER BY sequence",
                 (row['run_id'],))]
+            call_rows = list(self.db.execute("""SELECT * FROM tool_calls WHERE run_id=?
+                ORDER BY created_at,sequence""", (row['run_id'],)))
+            tool_calls = [ToolCall(**{**dict(item),
+                'arguments': json.loads(item['arguments']),
+                'content_hash': item['content_hash'] or '',
+                'result': item['result'] or ''}) for item in call_rows]
             tool_action = None
-            if row['tool_name']:
+            if call_rows:
+                latest = call_rows[-1]
+                arguments = json.loads(latest['arguments'])
+                mapped_status = 'waiting' if latest['status'] == 'pending' else latest['status']
+                preview = latest['result'] or '' if latest['status'] in ('pending', 'approved') else ''
+                tool_action = ToolAction(tool=latest['tool_name'],
+                    path=arguments.get('path') or '', command=arguments.get('command') or [],
+                    collection_id=arguments.get('collection_id') or '',
+                    query=arguments.get('query') or '', limit=arguments.get('limit') or 5,
+                    preview=preview,
+                    risk='high' if latest['tool_name'] == 'terminal.execute' else 'medium',
+                    status=mapped_status, args_hash=latest['args_hash'],
+                    content_hash=latest['content_hash'] or '',
+                    result=(latest['result'] or '' if latest['status'] not in
+                            ('pending', 'approved') else ''))
+            elif row['tool_name']:
                 request = json.loads(row['tool_request'])
                 tool_action = ToolAction(tool=row['tool_name'], path=request.get('path') or '',
                     command=request.get('command') or [], preview=row['tool_preview'],
@@ -1166,5 +1307,6 @@ class Store:
                                          started_at=row['started_at'], resumed_at=row['resumed_at'],
                                          finished_at=row['finished_at'],
                                          status_events=status_events,
+                                         tool_calls=tool_calls,
                                          tool_action=tool_action, messages=messages))
         return OrchestrationHistory(runs=runs)

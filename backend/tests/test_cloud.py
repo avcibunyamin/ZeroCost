@@ -6,7 +6,7 @@ from pydantic import SecretStr
 from google import genai
 from zerocost.providers.cloud import AnthropicProvider, GeminiProvider
 from zerocost.providers.openai_compatible import OpenAIProvider
-from zerocost.providers.base import (Message, PermanentProviderError, ProviderError, RetryableProviderError,
+from zerocost.providers.base import (Message, TextChunk, ToolCallChunk, PermanentProviderError, ProviderError, RetryableProviderError,
                                      provider_exception)
 from zerocost.pricing import TokenUsage
 from zerocost.models import ConnectionInput, OllamaModel, OllamaModels
@@ -14,6 +14,99 @@ from zerocost.sidecar import ChatService
 from zerocost.storage import Store
 
 MESSAGES = [Message(role='system', content='instructions'), Message(role='user', content='hello')]
+TOOLS = [{'name': 'workspace_write', 'description': 'write', 'parameters': {
+    'type': 'object', 'properties': {'path': {'type': 'string'}}, 'required': ['path']}}]
+
+
+def test_openai_streams_fragmented_native_tool_call():
+    def handler(request):
+        body = json.loads(request.content)
+        assert body['tools'] == [{'type': 'function', 'function': TOOLS[0]}]
+        frames = [
+            {'choices': [{'delta': {'tool_calls': [{'index': 0, 'id': 'call-provider',
+                'function': {'name': 'workspace_', 'arguments': '{"path":'}}]},
+                'finish_reason': None}]},
+            {'choices': [{'delta': {'tool_calls': [{'index': 0,
+                'function': {'name': 'write', 'arguments': '"README.md"}'}}]},
+                'finish_reason': 'tool_calls'}]},
+            {'choices': [], 'usage': {'prompt_tokens': 4, 'completion_tokens': 3}},
+        ]
+        return httpx.Response(200, headers={'content-type': 'text/event-stream'},
+            text=''.join(f'data: {json.dumps(frame)}\n\n' for frame in frames) +
+                 'data: [DONE]\n\n')
+
+    async def run():
+        provider = OpenAIProvider('gpt-4o-mini', transport=httpx.MockTransport(handler))
+        events = [event async for event in provider.stream_reply(
+            MESSAGES, api_key=SecretStr('synthetic-key'), tools=TOOLS)]
+        assert events == [
+            ToolCallChunk(0, 'call-provider', 'workspace_', '{"path":'),
+            ToolCallChunk(0, '', 'write', '"README.md"}'),
+        ]
+        assert provider.usage == TokenUsage(4, 3)
+    asyncio.run(run())
+
+
+def test_anthropic_streams_native_tool_use_blocks():
+    def handler(request):
+        body = json.loads(request.content)
+        assert body['tools'] == [{'name': 'workspace_write', 'description': 'write',
+                                  'input_schema': TOOLS[0]['parameters']}]
+        frames = [
+            ('message_start', {'type': 'message_start', 'message': {'id': 'msg', 'type': 'message',
+                'role': 'assistant', 'model': 'test', 'content': [], 'stop_reason': None,
+                'stop_sequence': None, 'usage': {'input_tokens': 2, 'output_tokens': 0}}}),
+            ('content_block_start', {'type': 'content_block_start', 'index': 0,
+                'content_block': {'type': 'tool_use', 'id': 'toolu-provider',
+                                  'name': 'workspace_write', 'input': {}}}),
+            ('content_block_delta', {'type': 'content_block_delta', 'index': 0,
+                'delta': {'type': 'input_json_delta', 'partial_json': '{"path":"README.md"}'}}),
+            ('content_block_stop', {'type': 'content_block_stop', 'index': 0}),
+            ('message_delta', {'type': 'message_delta', 'delta': {'stop_reason': 'tool_use',
+                'stop_sequence': None}, 'usage': {'output_tokens': 3}}),
+            ('message_stop', {'type': 'message_stop'}),
+        ]
+        return httpx.Response(200, headers={'content-type': 'text/event-stream'},
+            text=''.join(f'event: {kind}\ndata: {json.dumps(data)}\n\n' for kind, data in frames))
+
+    async def run():
+        provider = AnthropicProvider('test', transport=httpx.MockTransport(handler))
+        events = [event async for event in provider.stream_reply(
+            MESSAGES, api_key=SecretStr('synthetic-key'), tools=TOOLS)]
+        assert events == [
+            ToolCallChunk(0, 'toolu-provider', 'workspace_write', ''),
+            ToolCallChunk(0, '', '', '{"path":"README.md"}'),
+            ToolCallChunk(0, '', '', '', True),
+        ]
+        assert provider.usage == TokenUsage(2, 3)
+    asyncio.run(run())
+
+
+def test_gemini_streams_native_function_call():
+    def handler(request):
+        body = json.loads(request.content)
+        declarations = body['tools'][0]['functionDeclarations']
+        assert declarations[0]['name'] == 'workspace_write'
+        candidate = {'content': {'role': 'model', 'parts': [{'functionCall': {
+            'id': 'gemini-provider', 'name': 'workspace_write',
+            'args': {'path': 'README.md'}}}]}, 'finishReason': 'STOP'}
+        return httpx.Response(200, headers={'content-type': 'text/event-stream'},
+            text='data: ' + json.dumps({'candidates': [candidate], 'usageMetadata': {
+                'promptTokenCount': 2, 'candidatesTokenCount': 1, 'totalTokenCount': 3}}) + '\n\n')
+
+    def factory(**kwargs):
+        kwargs['http_options'].httpx_async_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler))
+        return genai.Client(**kwargs)
+
+    async def run():
+        provider = GeminiProvider('test', client_factory=factory)
+        events = [event async for event in provider.stream_reply(
+            MESSAGES, api_key=SecretStr('synthetic-key'), tools=TOOLS)]
+        assert events == [ToolCallChunk(0, 'gemini-provider', 'workspace_write',
+                                        '{"path":"README.md"}', True)]
+        assert provider.usage == TokenUsage(2, 1)
+    asyncio.run(run())
 
 
 def test_retry_after_is_extracted_without_exposing_provider_response():
@@ -47,7 +140,7 @@ def test_anthropic_sdk_stream_system_and_auth(complete):
     async def run():
         provider = AnthropicProvider('test', transport=httpx.MockTransport(handler))
         if complete:
-            assert [t async for t in provider.stream_reply(MESSAGES, api_key=SecretStr('synthetic-key'))] == ['merhaba']
+            assert [t async for t in provider.stream_reply(MESSAGES, api_key=SecretStr('synthetic-key'))] == [TextChunk('merhaba')]
             assert (provider.usage.input_tokens, provider.usage.output_tokens) == (1, 1)
         else:
             with pytest.raises(ProviderError):
@@ -77,7 +170,7 @@ def test_gemini_sdk_mapping_safety_and_terminal(finish):
         provider = GeminiProvider('test', client_factory=factory)
         messages = [MESSAGES[0], Message(role='assistant', content='previous'), MESSAGES[1]]
         if finish == 'STOP':
-            assert [t async for t in provider.stream_reply(messages, api_key=SecretStr('synthetic-key'))] == ['answer']
+            assert [t async for t in provider.stream_reply(messages, api_key=SecretStr('synthetic-key'))] == [TextChunk('answer')]
             assert (provider.usage.input_tokens, provider.usage.output_tokens) == (3, 6)
         else:
             with pytest.raises(ProviderError):
@@ -126,7 +219,7 @@ def test_openai_compatible_stream_auth_done_and_usage():
         provider = OpenAIProvider('gpt-4o-mini', transport=httpx.MockTransport(handler))
         tokens = [token async for token in provider.stream_reply(
             MESSAGES, api_key=SecretStr('synthetic-key'))]
-        assert tokens == ['mer', 'haba']
+        assert tokens == [TextChunk('mer'), TextChunk('haba')]
         assert provider.usage == TokenUsage(3, 2)
     asyncio.run(run())
 
@@ -144,7 +237,7 @@ def test_openai_reasoning_model_uses_completion_token_parameter():
     async def run():
         provider = OpenAIProvider('o4-mini', transport=httpx.MockTransport(handler))
         assert [token async for token in provider.stream_reply(
-            MESSAGES, api_key=SecretStr('synthetic-key'), max_tokens=321)] == ['ok']
+            MESSAGES, api_key=SecretStr('synthetic-key'), max_tokens=321)] == [TextChunk('ok')]
     asyncio.run(run())
 
 

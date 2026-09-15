@@ -46,6 +46,22 @@ function elapsedLabel(start: string | null | undefined, now: number) {
   return `${hours} sa ${minutes % 60} dk`;
 }
 
+function toolCallSummary(call: OrchestrationRun["tool_calls"][number]) {
+  if (call.tool_name === "workspace.write") {
+    const path = typeof call.arguments.path === "string" ? call.arguments.path : "dosya";
+    const content = typeof call.arguments.content === "string" ? call.arguments.content : "";
+    return `${path} · ${content.length.toLocaleString("tr-TR")} karakter · ${call.content_hash.slice(0, 12)}`;
+  }
+  if (call.tool_name === "terminal.execute") {
+    const command = Array.isArray(call.arguments.command)
+      ? call.arguments.command.filter((item): item is string => typeof item === "string")
+      : [];
+    return command.join(" ") || "Komut bilgisi yok";
+  }
+  const query = typeof call.arguments.query === "string" ? call.arguments.query : "Arama";
+  return query;
+}
+
 type StreamingMessage = {
   run_id: string;
   agent_id: string;
@@ -403,6 +419,7 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
       resumed_at: null,
       finished_at: null,
       status_events: [],
+      tool_calls: [],
       messages: [],
     };
     runId.current = id;
@@ -1033,6 +1050,21 @@ export function Orchestration({ snapshot }: { snapshot: Snapshot | null }) {
             <strong>{current.tool_action.tool} · {current.tool_action.status}</strong>
             {current.tool_action.result && <pre>{current.tool_action.result}</pre>}
           </div>}
+          {!!current?.tool_calls.length && (
+            <div className="approval-card tool-call-audit">
+              <strong>Araç çağrıları</strong>
+              {current.tool_calls.map((call) => <div key={call.id}>
+                <span><b>{call.tool_name}</b> · {call.status}</span>
+                <small>{toolCallSummary(call)}</small>
+                <small>
+                  İç kimlik {call.id.slice(0, 12)}
+                  {call.provider_call_id && ` · Sağlayıcı ${call.provider_call_id.slice(0, 24)}`}
+                  {` · ${call.duration_ms} ms`}
+                </small>
+                {call.result && <pre>{call.result}</pre>}
+              </div>)}
+            </div>
+          )}
           {!!current?.model_call_attempts.length && (
             <div className="approval-card model-call-audit">
               <strong>Model çağrı günlüğü</strong>

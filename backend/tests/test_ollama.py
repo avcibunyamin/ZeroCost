@@ -3,9 +3,31 @@ import json
 
 import httpx
 
-from zerocost.providers.base import (Message, PermanentProviderError, ProviderError,
+from zerocost.providers.base import (Message, TextChunk, ToolCallChunk, PermanentProviderError, ProviderError,
                                      RetryableProviderError)
 from zerocost.providers.ollama import OllamaProvider
+
+
+def test_native_tool_call_is_sent_and_emitted():
+    tools = [{'name': 'knowledge_search', 'description': 'search', 'parameters': {
+        'type': 'object', 'properties': {'query': {'type': 'string'}}, 'required': ['query']}}]
+
+    async def handler(request):
+        body = json.loads(request.content)
+        assert body['tools'] == [{'type': 'function', 'function': tools[0]}]
+        payload = {'message': {'role': 'assistant', 'content': '', 'tool_calls': [{
+            'id': 'ollama-provider', 'function': {'name': 'knowledge_search',
+                                                  'arguments': {'query': 'kanıt'}}}]},
+            'done': True, 'done_reason': 'stop', 'prompt_eval_count': 2, 'eval_count': 1}
+        return httpx.Response(200, content=json.dumps(payload) + '\n')
+
+    async def scenario():
+        provider = OllamaProvider('model', httpx.MockTransport(handler))
+        events = [event async for event in provider.stream_reply(
+            [Message(role='user', content='ara')], tools=tools)]
+        assert events == [ToolCallChunk(0, 'ollama-provider', 'knowledge_search',
+                                        '{"query":"kanıt"}', True)]
+    asyncio.run(scenario())
 
 
 def test_model_discovery_filters_embeddings_and_prefers_tool_models():
@@ -41,7 +63,7 @@ def test_ndjson_stream_yields_only_content_and_requires_done():
     async def scenario():
         provider = OllamaProvider("model", httpx.MockTransport(handler))
         chunks = [chunk async for chunk in provider.stream_reply([Message(role="user", content="hi")])]
-        assert chunks == ["mer", "haba"]
+        assert chunks == [TextChunk("mer"), TextChunk("haba")]
         assert (provider.usage.input_tokens, provider.usage.output_tokens) == (3, 2)
 
     asyncio.run(scenario())

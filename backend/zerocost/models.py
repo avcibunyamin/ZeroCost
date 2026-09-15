@@ -12,6 +12,7 @@ Permission = Literal["workspace.read", "workspace.write", "terminal.execute"]
 MutationToolName = Literal["workspace.write", "terminal.execute"]
 ToolName = Literal["workspace.write", "terminal.execute", "knowledge.search"]
 RoutingMode = Literal["manual", "auto"]
+ToolCapability = Literal["unknown", "true", "false"]
 
 
 class Model(BaseModel):
@@ -23,6 +24,7 @@ class ConnectionInput(Model):
     provider: Provider
     model_id: Name
     base_url: Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)] = ""
+    supports_tools: ToolCapability = "unknown"
 
     @model_validator(mode="after")
     def safe_provider_endpoint(self):
@@ -326,6 +328,16 @@ class ConnectionModelsInput(Model):
 class ConnectionModelsRequest(RequestBase):
     method: Literal["connection.models"]
     params: ConnectionModelsInput
+
+
+class ConnectionToolsInput(Model):
+    connection_id: Identifier
+    supports_tools: ToolCapability
+
+
+class ConnectionToolsRequest(RequestBase):
+    method: Literal["connection.tools.set"]
+    params: ConnectionToolsInput
 
 
 class ChatStartInput(Model):
@@ -718,6 +730,22 @@ class ToolAction(Model):
     result: str = ""
 
 
+class ToolCall(Model):
+    id: str
+    run_id: str
+    node_name: str
+    sequence: int = Field(ge=1)
+    provider_call_id: str = ""
+    tool_name: ToolName
+    arguments: dict
+    args_hash: str
+    content_hash: str = ""
+    status: Literal["pending", "approved", "executing", "completed", "rejected", "uncertain"]
+    result: str = ""
+    duration_ms: int = Field(default=0, ge=0)
+    created_at: str
+
+
 class OrchestrationRun(Model):
     run_id: str
     objective: str
@@ -758,6 +786,7 @@ class OrchestrationRun(Model):
     resumed_at: str | None
     finished_at: str | None
     status_events: list["OrchestrationStatusEvent"] = Field(default_factory=list)
+    tool_calls: list[ToolCall] = Field(default_factory=list)
     tool_action: ToolAction | None
     status: OrchestrationStatus
     error: str
@@ -964,7 +993,8 @@ class OrchestrationPaused(Model):
 Request = Annotated[Union[SnapshotRequest, ConnectionRequest, AgentRequest, WorkspaceRequest,
                          AgentPermissionsRequest, AgentFallbacksRequest,
                          WorkspaceListRequest, WorkspaceReadRequest,
-                         ModelsRequest, ConnectionModelsRequest, ChatStartRequest, CancelRequest, HistoryRequest, VaultRequest,
+                         ModelsRequest, ConnectionModelsRequest, ConnectionToolsRequest,
+                         ChatStartRequest, CancelRequest, HistoryRequest, VaultRequest,
                          OrchestrationStartRequest, OrchestrationCancelRequest,
                          OrchestrationApprovalRequest, OrchestrationRetryRequest,
                          OrchestrationQueueResumeRequest,

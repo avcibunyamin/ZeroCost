@@ -32,6 +32,7 @@ Windows'ta Python komutu `.venv\Scripts\python.exe` olur. Node yardımcı betikl
 - Ollama model keşfi; yalnızca metin üretebilen kurulu modellerin gösterilmesi.
 - Sıralı ve çalışma zamanı doğrulamalı akış olaylarıyla yerel sohbet, iptal ve kalıcı geçmiş.
 - LangGraph tabanlı 2–4 ajan tartışması, 1–3 tur karşı görüş ve koordinatör sentezi.
+- OpenAI, Claude, Gemini ve Ollama için native araç çağırma; küçük modeller için doğrulanmış fenced JSON yedeği.
 - Geçici sağlayıcı hatalarında sınırlı backoff ve kalıcı checkpoint'ten kullanıcı tetiklemeli düğüm devamı.
 - Ajan/aşama kimlikli canlı görev olayları, SQLite görev geçmişi ve LangGraph SQLite checkpoint'leri.
 - Kalıcı FIFO görev kuyruğu, iki orkestrasyon worker'ı, bağlantı başına tek eşzamanlı model çağrısı ve güvenli yeniden sürdürme.
@@ -56,6 +57,14 @@ Claude sistem talimatları mesaj listesinden ayrılır. Gemini'nin dört ayarlan
 OpenAI ve LM Studio aynı sınırlandırılmış OpenAI-compatible adaptörü kullanır, fakat iki ayrı güven profili olarak kaydedilir. OpenAI endpoint'i sabit `https://api.openai.com/v1` değeridir ve API anahtarı zorunludur. LM Studio API anahtarı istemez; endpoint yalnız `http` üzerinden `localhost`, `127.0.0.1` veya `::1` olabilir ve `/v1` dışında yol, kimlik bilgisi, sorgu ya da fragment kabul edilmez. Model kimliği her zaman elle girilebilir. **Modelleri denetle** işlemi `/v1/models` isteğini üç saniyede sınırlar; keşif hatası bağlantıyı oluşturmayı veya mevcut profili kullanmayı engellemez.
 
 OpenAI-compatible akış, SSE `data:` çerçevelerini ve zorunlu `[DONE]` sonlandırıcısını doğrular; sağlayıcı token kullanımını ortak maliyet katmanına aktarır. o3/o4 gibi reasoning modellerinde `max_completion_tokens`, diğer modellerde `max_tokens` gönderilir. OpenAI ve LM Studio profil ayrımı, yerel endpoint'in daha sonra bir bulut sağlayıcıya çevrilmesini ve bulut trafiğinin kullanıcı tanımlı bir adrese yönlendirilmesini önler.
+
+## Sağlayıcıdan bağımsız native araç çağırma
+
+Model bağlantısı `Otomatik dene`, `Native destekli` veya `Fenced JSON` araç çağırma profiline sahiptir. Otomatik mod native function tanımlarını gönderir; model yapılandırılmış çağrı üretmezse mevcut `zerocost-tool` zarfını kabul eder. Native destekli mod metin içindeki zarfı çalıştırmaz. Böylece yanlışlıkla basılan örnek JSON'un araç olarak yorumlanması önlenir. Native desteği olmayan küçük Ollama/LM Studio modelleri fenced yolu kullanabilir.
+
+OpenAI-compatible SSE `delta.tool_calls`, Claude `tool_use`/`input_json_delta`, Gemini `functionCall` ve Ollama `message.tool_calls` parçaları ortak `ToolCallChunk` akışında birleşir. Dış sağlayıcı şemalarında taşınabilir `workspace_write`, `terminal_execute` ve `knowledge_search` adları kullanılır; backend bunları izin modelindeki noktalı canonical adlara çevirir. [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling), [Claude fine-grained tool streaming](https://platform.claude.com/docs/en/agents-and-tools/tool-use/fine-grained-tool-streaming), [Gemini function calling](https://ai.google.dev/gemini-api/docs/function-calling) ve [Ollama tool calling](https://docs.ollama.com/capabilities/tool-calling) protokolleri adaptör sınırında kalır.
+
+Her çağrı için sağlayıcıdan bağımsız kimlik `run_id + node + sequence` değerlerinden deterministik üretilir; sağlayıcının kimliği ayrı denetim alanında tutulur. SQLite şema v18, doğrulanmış argümanları, SHA-256 argüman/içerik özetlerini, onay-yürütme-belirsizlik durumlarını, sonucu ve süreyi `tool_calls` tablosuna yazar. Aynı iç kimlik farklı argümanlarla tekrar kullanılamaz. Eski görev kayıtlarının araç alanları okunmaya devam eder. Onay, izin, atomik yazma, terminal argv sınırı ve çöküş sonrası belirsiz sonuç kuralları her iki çağrı yolunda aynıdır. Karar [ADR-0008](docs/adr/0008-provider-neutral-native-tool-calling.md) içinde kayıtlıdır.
 
 Orkestrasyon kuyruğu iki görevi çalıştırabilir; aynı bağlantıya bağlı çağrılar hesap/rate-limit çakışmasını önlemek için sıraya alınır. Tekli sohbet sırasında orkestrasyon worker'ları yeni iş başlatmaz. SDK entegrasyonları sahte HTTP yanıtlarıyla test edilir; gerçek bulut anahtarı ve ücretli çağrı kullanılmadı. macOS native kasa testi yalnız sentetik anahtar oluşturup siler: `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --include-ignored`. Windows/Linux kasa davranışları bu cihazda doğrulanmadı. Geliştirme ve paketleme ortamı Python 3.12.14'e geçirildi.
 

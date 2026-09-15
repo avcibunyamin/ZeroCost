@@ -4,7 +4,7 @@ import re
 from typing import AsyncIterator
 import httpx
 from .base import (Message, PermanentProviderError, ProviderAdapter, ProviderError,
-                   RetryableProviderError)
+                   RetryableProviderError, TextChunk, ToolCallChunk)
 from ..models import OllamaModel, OllamaModels
 from ..pricing import TokenUsage
 
@@ -77,7 +77,8 @@ class OpenAIProvider(ProviderAdapter):
             raise PermanentProviderError("Model listesi geçersiz JSON içeriyor.") from exc
 
     async def stream_reply(self, messages: list[Message], *, api_key=None,
-                           max_tokens: int = 512) -> AsyncIterator[str]:
+                           max_tokens: int = 512,
+                           tools: list[dict] | None = None) -> AsyncIterator[TextChunk | ToolCallChunk]:
         self.usage = TokenUsage()
         self._key(api_key)
         request = {
@@ -92,6 +93,8 @@ class OpenAIProvider(ProviderAdapter):
                            re.match(r"^o[134](?:-|$)", self.model.casefold())
                            else "max_tokens")
         request[token_parameter] = max_tokens
+        if tools:
+            request["tools"] = [{"type": "function", "function": tool} for tool in tools]
         try:
             async with self.client(api_key) as client:
                 async with client.stream("POST", "/chat/completions",
@@ -135,10 +138,26 @@ class OpenAIProvider(ProviderAdapter):
                                 if token is not None and not isinstance(token, str):
                                     raise PermanentProviderError("SSE metin biçimi geçersiz.")
                                 if token:
-                                    yield token
+                                    yield TextChunk(token)
+                                tool_calls = choice.get("delta", {}).get("tool_calls", [])
+                                if not isinstance(tool_calls, list):
+                                    raise PermanentProviderError("SSE araç çağrısı biçimi geçersiz.")
+                                for call in tool_calls:
+                                    if not isinstance(call, dict) or not isinstance(call.get("index"), int):
+                                        raise PermanentProviderError("SSE araç çağrısı biçimi geçersiz.")
+                                    function = call.get("function") or {}
+                                    if not isinstance(function, dict):
+                                        raise PermanentProviderError("SSE araç çağrısı biçimi geçersiz.")
+                                    name = function.get("name", "")
+                                    arguments = function.get("arguments", "")
+                                    if not isinstance(name, str) or not isinstance(arguments, str):
+                                        raise PermanentProviderError("SSE araç çağrısı biçimi geçersiz.")
+                                    yield ToolCallChunk(index=call["index"],
+                                        provider_call_id=str(call.get("id") or ""),
+                                        name_delta=name, arguments_delta=arguments)
                                 reason = choice.get("finish_reason")
                                 if reason is not None:
-                                    if reason != "stop":
+                                    if reason not in ({"stop", "tool_calls"} if tools else {"stop"}):
                                         raise PermanentProviderError(
                                             "Model yanıtı sınır veya sağlayıcı kararı nedeniyle tamamlanamadı.")
                                     finished = True

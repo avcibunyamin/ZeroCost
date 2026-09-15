@@ -188,6 +188,7 @@ export function Chat({
             provider: "ollama",
             model_id: model,
             base_url: "",
+            supports_tools: "unknown",
           },
         });
         onSnapshot(current);
