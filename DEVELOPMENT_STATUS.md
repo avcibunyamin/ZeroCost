@@ -71,7 +71,7 @@ Araç önerileri tek işlemle sınırlıdır ve yerel modellerde yapılandırıl
 
 ## Yollar
 
-- Proje: /Users/avci/Desktop/ZeroCost
+- Proje: depo kök klasörü
 - Paket: src-tauri/target/release/bundle/macos/ZeroCost.app
 - Geliştirme: npm run desktop
 - macOS paket: npm run desktop:build -- --bundles app
